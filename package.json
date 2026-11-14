@@ -1,0 +1,16 @@
+{
+  "name": "discrete-homework-board",
+  "version": "0.1.0",
+  "private": true,
+  "description": "离散数学作业板 —— 编辑 / 符号 / 导出 PDF",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.7.0"
+  },
+  "dependencies": {
+    "katex": "^0.16.11"
+  }
+}

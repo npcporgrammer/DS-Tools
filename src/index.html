@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;">
+  <title>离散作业板</title>
+  <link rel="stylesheet" href="../vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true">
+  <defs>
+    <symbol id="i-new" viewBox="0 0 24 24">
+      <rect x="4.5" y="3.5" width="15" height="17" rx="2"/>
+      <path d="M12 8.5v7M8.5 12h7"/>
+    </symbol>
+    <symbol id="i-open" viewBox="0 0 24 24">
+      <path d="M3.5 8.2a1.7 1.7 0 0 1 1.7-1.7h4l1.8 2.2h7.8a1.7 1.7 0 0 1 1.7 1.7v9.1a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7z"/>
+    </symbol>
+    <symbol id="i-save" viewBox="0 0 24 24">
+      <path d="M4.5 5.5A1.5 1.5 0 0 1 6 4h9.5L19.5 8v11a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19z"/>
+      <path d="M8 4v5.5h7V4M8 20.5v-6h8v6"/>
+    </symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24">
+      <path d="M4.5 9.5h9.2a4.9 4.9 0 0 1 0 9.8H8.5"/>
+      <path d="M8 5.5 4 9.5l4 4"/>
+    </symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24">
+      <path d="M19.5 9.5h-9.2a4.9 4.9 0 0 0 0 9.8h5.2"/>
+      <path d="M16 5.5l4 4-4 4"/>
+    </symbol>
+    <symbol id="i-pdf" viewBox="0 0 24 24">
+      <path d="M6.5 3.5h7L18 8v12.5H6.5z"/>
+      <path d="M13.5 3.5V8H18"/>
+      <path d="M12 11.5v6M9.6 15 12 17.4l2.4-2.4"/>
+    </symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+      <path d="M9.5 4.5v15"/>
+    </symbol>
+    <symbol id="i-preview" viewBox="0 0 24 24">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+      <path d="M14.5 4.5v15"/>
+    </symbol>
+    <symbol id="i-fitw" viewBox="0 0 24 24">
+      <path d="M4 12h16"/>
+      <path d="M7.5 8.5 4 12l3.5 3.5M16.5 8.5 20 12l-3.5 3.5"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="app">
+
+  <!-- 顶部：快速访问工具栏 + 选项卡（Office 合二为一的顶栏） -->
+  <header class="appbar">
+    <div class="qat">
+      <button class="qbtn" data-act="undo" title="撤回　Ctrl+Z">
+        <svg class="ic"><use href="#i-undo"/></svg>
+      </button>
+      <button class="qbtn" data-act="redo" title="重做　Ctrl+Y">
+        <svg class="ic"><use href="#i-redo"/></svg>
+      </button>
+      <span class="qsep"></span>
+      <button class="qbtn" data-act="save" title="保存　Ctrl+S">
+        <svg class="ic"><use href="#i-save"/></svg>
+      </button>
+    </div>
+
+    <nav class="tabs">
+      <button class="tab is-active" data-tab="home">开始</button>
+      <button class="tab" data-tab="insert">插入</button>
+      <button class="tab" data-tab="view">视图</button>
+    </nav>
+
+    <span class="spacer"></span>
+
+    <span class="doc-name" id="docName">未命名.md</span>
+    <button class="btn-primary" data-act="export" title="导出 PDF　Ctrl+E">
+      <svg class="ic"><use href="#i-pdf"/></svg>
+      导出 PDF
+    </button>
+  </header>
+
+  <!-- 功能区 -->
+  <div class="ribbon">
+    <section class="panel is-active" data-panel="home">
+      <div class="grp">
+        <div class="grp-body">
+          <button class="rb" data-act="new">
+            <svg class="ic"><use href="#i-new"/></svg><span>新建</span>
+          </button>
+          <button class="rb" data-act="open">
+            <svg class="ic"><use href="#i-open"/></svg><span>打开</span>
+          </button>
+          <button class="rb" data-act="save">
+            <svg class="ic"><use href="#i-save"/></svg><span>保存</span>
+          </button>
+        </div>
+        <div class="grp-label">文件</div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-body col">
+          <button class="rs" data-act="undo">
+            <svg class="ic sm"><use href="#i-undo"/></svg><span>撤回</span>
+          </button>
+          <button class="rs" data-act="redo">
+            <svg class="ic sm"><use href="#i-redo"/></svg><span>重做</span>
+          </button>
+        </div>
+        <div class="grp-label">历史</div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-body">
+          <button class="rb" data-wrap="inline">
+            <span class="gl">$</span><span>行内公式</span>
+          </button>
+          <button class="rb" data-wrap="block">
+            <span class="gl">$$</span><span>公式块</span>
+          </button>
+        </div>
+        <div class="grp-label">公式</div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-body">
+          <button class="rb" data-act="export">
+            <svg class="ic"><use href="#i-pdf"/></svg><span>导出 PDF</span>
+          </button>
+        </div>
+        <div class="grp-label">输出</div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-body help">
+          <button class="rs wide" data-act="help">
+            <span class="gl sm">?</span><span>语法速查</span>
+          </button>
+        </div>
+        <div class="grp-label">帮助</div>
+      </div>
+      <span class="spacer"></span>
+    </section>
+
+    <section class="panel" data-panel="insert">
+      <div class="grp">
+        <div class="grp-body">
+          <button class="rb" data-snippet="frac"><span class="gl">a⁄b</span><span>分式</span></button>
+          <button class="rb" data-snippet="sqrt"><span class="gl">√</span><span>根号</span></button>
+          <button class="rb" data-snippet="sum"><span class="gl">∑</span><span>求和</span></button>
+          <button class="rb" data-snippet="matrix"><span class="gl">▦</span><span>矩阵</span></button>
+          <button class="rb" data-snippet="cases"><span class="gl">{</span><span>分段</span></button>
+        </div>
+        <div class="grp-label">公式结构</div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-body">
+          <button class="rb" data-snippet="truthtable"><span class="gl">▤</span><span>真值表</span></button>
+          <button class="rb" data-snippet="proof"><span class="gl">✓</span><span>证明框架</span></button>
+          <button class="rb" data-snippet="block"><span class="gl">$$</span><span>公式块</span></button>
+        </div>
+        <div class="grp-label">表格与结构</div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-body">
+          <button class="rb" data-snippet="tikz">
+            <svg class="ic" viewBox="0 0 24 24" fill="none">
+              <path d="M10.45 8.51 6.95 15.09M13.55 8.51 17.05 15.09M8.1 18h7.8"/>
+              <circle cx="12" cy="5.6" r="2.2" class="solid"/>
+              <circle cx="5.4" cy="18" r="2.2"/><circle cx="18.6" cy="18" r="2.2"/>
+            </svg>
+            <span>图（TikZ）</span>
+          </button>
+        </div>
+        <div class="grp-label">绘图</div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="view">
+      <div class="grp">
+        <div class="grp-body col">
+          <button class="rs" data-toggle="sidebar">
+            <svg class="ic sm"><use href="#i-panel"/></svg><span>符号面板</span>
+          </button>
+          <button class="rs" data-toggle="preview">
+            <svg class="ic sm"><use href="#i-preview"/></svg><span>预览窗格</span>
+          </button>
+        </div>
+        <div class="grp-label">窗格</div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-body">
+          <button class="rb" data-zoom="fit">
+            <svg class="ic"><use href="#i-fitw"/></svg><span>适应宽度</span>
+          </button>
+          <button class="rb" data-zoom="0.75"><span class="gl">75</span><span>75%</span></button>
+          <button class="rb" data-zoom="1"><span class="gl">100</span><span>100%</span></button>
+          <button class="rb" data-zoom="1.4"><span class="gl">140</span><span>140%</span></button>
+        </div>
+        <div class="grp-label">显示比例</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 工作区 -->
+  <main class="workspace">
+
+    <aside class="sidebar" id="sidebar">
+      <div class="panel-title has-actions">
+        <span>文件</span>
+        <i class="gap"></i>
+        <button class="tiny" id="btnNewFile" title="新建作业">＋</button>
+        <button class="tiny" id="btnDocsFolder" title="打开 Projects 文件夹">⌸</button>
+        <button class="tiny" id="btnExportsFolder" title="打开导出文件夹">⇩</button>
+      </div>
+      <div class="file-list" id="fileList"></div>
+
+      <div class="panel-title">作业信息</div>
+      <div class="meta-grid">
+        <label class="field"><span>姓名</span><input id="metaName" placeholder="张三" autocomplete="off"></label>
+        <label class="field"><span>学号</span><input id="metaStudent" placeholder="20230001" autocomplete="off"></label>
+        <label class="field"><span>课程</span><input id="metaCourse" placeholder="离散数学" autocomplete="off"></label>
+        <label class="field"><span>第几次</span><input id="metaAssign" placeholder="3" autocomplete="off"></label>
+      </div>
+
+      <div class="panel-title">符号</div>
+      <div class="palette" id="palette"></div>
+    </aside>
+
+    <div class="panes" id="panes">
+
+    <section class="pane editor-pane">
+      <div class="sheet">
+        <div class="sheet-cap">
+          <span>源码</span>
+          <span class="cap-meta">Markdown + LaTeX</span>
+        </div>
+        <textarea id="editor" spellcheck="false" wrap="off"></textarea>
+      </div>
+    </section>
+
+    <div class="splitter" id="splitter"></div>
+
+    <section class="pane preview-pane">
+      <div class="sheet-cap canvas-cap">
+        <span>预览</span>
+        <span class="cap-meta" id="previewNote">A4</span>
+      </div>
+      <div class="preview-scroll" id="previewScroll">
+        <div class="page-wrap" id="pageWrap">
+          <div class="page" id="page"></div>
+        </div>
+      </div>
+    </section>
+
+    </div>
+
+  </main>
+
+  <!-- 状态栏 -->
+  <footer class="statusbar">
+    <span id="statPos">第 1 行，第 1 列</span>
+    <span class="dot">·</span>
+    <span id="statCount">0 字</span>
+    <span class="dot">·</span>
+    <span id="statState" class="state">就绪</span>
+
+    <span class="spacer"></span>
+
+    <button class="stat-btn" data-zoom="fit" title="适应宽度">适应</button>
+    <div class="zoom">
+      <button class="stat-icon" id="zoomOut" title="缩小">−</button>
+      <input type="range" id="zoomRange" min="40" max="180" step="5" value="100" title="显示比例">
+      <button class="stat-icon" id="zoomIn" title="放大">+</button>
+      <span class="zoom-text" id="zoomText">100%</span>
+    </div>
+  </footer>
+
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<div class="modal" id="confirmModal" hidden>
+  <div class="modal-card narrow">
+    <header><h3>删除作业</h3></header>
+    <div class="modal-body">
+      <p id="confirmText" class="confirm-text"></p>
+    </div>
+    <footer>
+      <button class="stat-btn" id="confirmCancel">取消</button>
+      <button class="btn-primary danger" id="confirmOk">删除</button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal" id="promptModal" hidden>
+  <div class="modal-card narrow">
+    <header><h3 id="promptTitle">保存为</h3></header>
+    <div class="modal-body">
+      <input id="promptInput" class="prompt-input" autocomplete="off" spellcheck="false">
+      <p class="prompt-hint">保存在 <code>Projects</code> 文件夹里</p>
+    </div>
+    <footer>
+      <button class="stat-btn" id="promptCancel">取消</button>
+      <button class="btn-primary" id="promptOk">确定</button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-card">
+    <header>
+      <h3>语法速查</h3>
+      <button class="stat-btn" id="helpClose">关闭</button>
+    </header>
+    <div class="modal-body">
+      <dl>
+        <dt>标题</dt><dd><code># 一级</code> <code>## 二级</code> <code>### 三级</code></dd>
+        <dt>行内公式</dt><dd><code>$x \in A$</code> → 随文排版</dd>
+        <dt>独立公式</dt><dd><code>$$ ... $$</code> 独占一行居中</dd>
+        <dt>加粗 / 斜体</dt><dd><code>**粗体**</code> <code>*斜体*</code></dd>
+        <dt>列表</dt><dd><code>- 项目</code> / <code>1. 步骤</code></dd>
+        <dt>真值表 / 矩阵</dt><dd>管道表格：<code>| p | q |</code>，第二行写 <code>|---|---|</code></dd>
+        <dt>图</dt><dd>三个反引号 + <code>tikz</code>，里面写 TikZ 代码</dd>
+        <dt>换行</dt><dd>段落里单个换行就是换行（推导一行一步很方便）</dd>
+        <dt>特殊字符</dt><dd><code>% &amp; # _ { } \</code> 会自动转义，直接写就行</dd>
+        <dt>撤销</dt><dd><code>Ctrl+Z</code> 撤回一步，<code>Ctrl+Y</code> 重做</dd>
+      </dl>
+      <p class="tip">左侧符号面板点一下就能插入；在公式外面点会<strong>自动补上 <code>$…$</code></strong>。</p>
+    </div>
+  </div>
+</div>
+
+<script src="../vendor/katex/katex.min.js"></script>
+<script src="md2html.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>

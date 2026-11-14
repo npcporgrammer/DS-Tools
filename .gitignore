@@ -1,0 +1,24 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 编译临时目录
+.cache/
+
+# 用户数据（作业源码与导出的 PDF 不入库）
+Projects/
+导出/
+
+# LaTeX 中间文件
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# 系统 / 编辑器
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

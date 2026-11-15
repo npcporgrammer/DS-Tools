@@ -19,7 +19,7 @@
   --w-press:      #edebe9;
 
   --page-line:    #d9d9d9;
-  --green:        #107c41;
+  --ok:           #2b579a;   /* 与主色一致：Word 蓝 */
   --amber:        #b8860b;
   --red:          #a4262c;
 
@@ -656,7 +656,7 @@ html, body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--green);
+  background: var(--ok);
 }
 .state.busy::before { background: var(--amber); animation: breathe 1.1s ease-in-out infinite; }
 .state.err::before { background: var(--red); }
@@ -725,7 +725,7 @@ html, body {
 }
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } }
 
-.toast.ok { border-left-color: var(--green); }
+.toast.ok { border-left-color: var(--ok); }
 .toast.error { border-left-color: var(--red); }
 
 .toast-title { font-weight: 600; margin-bottom: 4px; }

@@ -28,3 +28,15 @@ foreach ($f in @('main.js', 'preload.js', 'package.json', 'lib', 'src', 'vendor'
 Write-Host ''
 Write-Host "打包完成：$out\离散作业板.exe"
 Write-Host ("体积：" + [math]::Round(((Get-ChildItem $out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1) + " MB")
+
+# 把图标写进 exe 资源段（这样桌面/资源管理器里显示的就是应用图标）
+$iconScript = Join-Path $root '_dev\set-exe-icon.ps1'
+$exePath = Join-Path $out '离散作业板.exe'
+if ((Test-Path $iconScript) -and (Test-Path $exePath)) {
+  try {
+    & powershell -ExecutionPolicy Bypass -File $iconScript -Exe $exePath -Ico (Join-Path $root 'src\icon.ico') | Out-Null
+    Write-Host '已写入 exe 图标'
+  } catch {
+    Write-Warning "写入 exe 图标失败：$_"
+  }
+}

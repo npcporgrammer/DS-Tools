@@ -145,10 +145,35 @@ ipcMain.handle('docs:read', async (_e, name) => {
   return { name: n, content: fs.readFileSync(p, 'utf8') };
 });
 
+/* 覆盖前留底：同一文档 5 分钟内最多存一份；最多保留最近 30 份 */
+function backupBeforeWrite(name, nextContent) {
+  try {
+    const src = path.join(DOCS_DIR, name);
+    if (!fs.existsSync(src)) return;
+    const prev = fs.readFileSync(src, 'utf8');
+    if (prev === nextContent) return;
+
+    const dir = path.join(DOCS_DIR, '.history', name.replace(/\.md$/i, ''));
+    fs.mkdirSync(dir, { recursive: true });
+
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort();
+    const last = files.length ? fs.statSync(path.join(dir, files[files.length - 1])).mtimeMs : 0;
+    if (Date.now() - last > 5 * 60 * 1000) {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      fs.copyFileSync(src, path.join(dir, ts + '.md'));
+      const all = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort();
+      for (const f of all.slice(0, Math.max(0, all.length - 30))) {
+        try { fs.unlinkSync(path.join(dir, f)); } catch (_) {}
+      }
+    }
+  } catch (_) {}
+}
+
 ipcMain.handle('docs:write', async (_e, { name, content }) => {
   ensureDirs();
   const n = safeName(name);
   if (!n) return { ok: false, error: '文件名为空' };
+  backupBeforeWrite(n, content);
   fs.writeFileSync(path.join(DOCS_DIR, n), content, 'utf8');
   return { ok: true, name: n };
 });

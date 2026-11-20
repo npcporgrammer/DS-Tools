@@ -1359,6 +1359,7 @@ function aiSetBusy(v) {
 
   /** 在编辑器里把 oldRaw 换成 newRaw；找不到就返回错误 */
   function applyEditText(oldRaw, newRaw, force) {
+    if (currentName) { try { window.api.snapshot(currentName); } catch (_) {} }
     const v = editor.value;
     const isAppend = !String(oldRaw).trim();
 

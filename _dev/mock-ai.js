@@ -25,6 +25,19 @@ function sse(res, obj) {
   res.write('data: ' + JSON.stringify(obj) + '\n\n');
 }
 
+const EDIT_ANSWER = [
+  '好的，我把那一行改掉。',
+  '',
+  '===EDIT===',
+  '说明：把示例行替换掉',
+  '---OLD---',
+  '旧的一行',
+  '---END---',
+  '---NEW---',
+  '新的一行',
+  '---END---'
+].join('\n');
+
 const server = http.createServer((req, res) => {
   if (req.method !== 'POST' || !req.url.includes('/chat/completions')) {
     res.writeHead(404).end('not found');
@@ -55,7 +68,12 @@ const server = http.createServer((req, res) => {
 
     // 先流式吐「思考」，再吐「正文」
     const reason = REASON.match(/[\s\S]{1,12}/g) || [];
-    const answer = ANSWER.match(/[\s\S]{1,10}/g) || [];
+    const first = (payload.messages && payload.messages[0]) || {};
+    const anyText = JSON.stringify(payload.messages || []);
+    const isEditTest = anyText.includes('[[EDITTEST]]');
+    const isVision = anyText.includes('image_url');
+    const src = isVision ? '识图结果（mock）：$$R \circ S = \{(x,z) \mid \exists y, (x,y)\in R, (y,z)\in S\}$$' : (isEditTest ? EDIT_ANSWER : ANSWER);
+    const answer = src.match(/[\s\S]{1,10}/g) || [];
     let i = 0, j = 0;
 
     const timer = setInterval(() => {

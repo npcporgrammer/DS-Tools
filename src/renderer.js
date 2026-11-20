@@ -959,7 +959,24 @@
     '你是「离散数学作业板」内置的助教。',
     '回答用简体中文，数学公式一律用 LaTeX：行内 $...$，独立公式 $$...$$。',
     '结论要能直接粘进作业：简洁、分步骤、给出理由，不要客套话。',
-    '涉及集合、关系、图论、组合、数理逻辑时使用标准符号与术语。'
+    '涉及集合、关系、图论、组合、数理逻辑时使用标准符号与术语。',
+    '',
+    '【修改文档】当用户要求你修改当前文档时，不要直接输出整篇新文档，而是拆成若干处独立的改动，每处用下面的格式：',
+    '===EDIT===',
+    '说明：一句话说明这处改什么',
+    '---OLD---',
+    '要被替换掉的原文（必须与文档中一字不差，包含换行）',
+    '---END---',
+    '---NEW---',
+    '替换后的新内容',
+    '---END---',
+    '',
+    '规则：',
+    '1. OLD 必须能在文档里精确找到；找不到就说明原因，不要硬猜。',
+    '2. 一处改动只做一件事，多处就写多个 EDIT 块。',
+    '3. 想追加内容时，OLD 留空即可。',
+    '4. EDIT 块之外可以写简短说明，但不要重复贴旧内容。',
+    '5. 用户没有要求改文档时，不要输出 EDIT 块。'
   ].join('\n');
 
   function aiEmptyHint() {
@@ -1037,7 +1054,7 @@
 
   function aiFinalize(cur) {
     if (!cur) return;
-    cur.bubble.innerHTML = MDRender.render(cur.text || '（没有返回内容）');
+    renderAssistantBody(cur);
     if (cur.reason) {
       cur.sum.textContent = '思考过程 · ' + cur.reason.length + ' 字';
     }
@@ -1048,14 +1065,14 @@
       ins.className = 'stat-btn';
       ins.textContent = '插入到光标处';
       ins.addEventListener('click', () => {
-        insertText(cur.text.trim() + '\n', null, 'op');
+        insertText(cur.plain.trim() + '\n', null, 'op');
         toast('已插入', 'ok', 1400);
       });
       const cp = document.createElement('button');
       cp.className = 'stat-btn';
       cp.textContent = '复制';
       cp.addEventListener('click', () => {
-        navigator.clipboard.writeText(cur.text).then(() => toast('已复制', 'ok', 1200));
+        navigator.clipboard.writeText(cur.plain).then(() => toast('已复制', 'ok', 1200));
       });
       tools.appendChild(ins);
       tools.appendChild(cp);
@@ -1064,8 +1081,7 @@
     }
     aiScrollBottom();
   }
-
-  function aiSetBusy(v) {
+function aiSetBusy(v) {
     aiBusy = v;
     aiSendBtn.disabled = v;
     aiStopBtn.hidden = !v;
@@ -1175,11 +1191,13 @@
   }
 
   async function aiOpenConfig() {
-    let c = { baseURL: '', model: '', hasKey: false, keyTail: '' };
+    let c = { baseURL: '', model: '', hasKey: false, keyTail: '', vision: {} };
     try { c = await window.api.ai.getConfig(); } catch (_) {}
+    const v = c.vision || {};
 
     $('aiBaseURL').value = c.baseURL || '';
     $('aiModel').value = c.model || '';
+
     const keyEl = $('aiKey');
     keyEl.value = '';
     keyEl.placeholder = c.hasKey ? ('已保存（尾号 ' + c.keyTail + '），留空不修改') : 'sk-...';
@@ -1188,6 +1206,16 @@
     const hit = Array.from(preset.options).find((o) => o.value === (c.baseURL + '|' + c.model));
     preset.value = hit ? hit.value : 'custom';
 
+    $('aiVBaseURL').value = v.baseURL || '';
+    $('aiVModel').value = v.model || '';
+    const vKey = $('aiVKey');
+    vKey.value = '';
+    vKey.placeholder = v.hasKey ? ('已保存（尾号 ' + v.keyTail + '），留空不修改') : 'sk-...';
+
+    const vpreset = $('aiVPreset');
+    const vhit = Array.from(vpreset.options).find((o) => o.value === (v.baseURL + '|' + v.model));
+    vpreset.value = vhit ? vhit.value : 'custom';
+
     $('aiCfgModal').hidden = false;
   }
 
@@ -1195,9 +1223,14 @@
     const patch = {
       baseURL: $('aiBaseURL').value.trim(),
       model: $('aiModel').value.trim(),
-      apiKey: $('aiKey').value.trim()
+      apiKey: $('aiKey').value.trim(),
+      vision: {
+        baseURL: $('aiVBaseURL').value.trim(),
+        model: $('aiVModel').value.trim(),
+        apiKey: $('aiVKey').value.trim()
+      }
     };
-    if (!patch.baseURL || !patch.model) { toast('Base URL 和模型都要填', 'error', 2400); return; }
+    if (!patch.baseURL || !patch.model) { toast('文本模型的 Base URL 和模型都要填', 'error', 2400); return; }
     const r = await window.api.ai.setConfig(patch);
     if (r && r.ok) {
       $('aiCfgModal').hidden = true;
@@ -1207,22 +1240,37 @@
     }
   }
 
-  async function aiProbe() {
-    const btn = $('aiCfgTest');
+  async function aiProbe(vision) {
+    const btn = vision ? $('aiVCfgTest') : $('aiCfgTest');
     btn.disabled = true;
+    const label = btn.textContent;
     btn.textContent = '测试中…';
-    // 先保存，避免测的是旧配置
     await window.api.ai.setConfig({
       baseURL: $('aiBaseURL').value.trim(),
       model: $('aiModel').value.trim(),
-      apiKey: $('aiKey').value.trim()
+      apiKey: $('aiKey').value.trim(),
+      vision: {
+        baseURL: $('aiVBaseURL').value.trim(),
+        model: $('aiVModel').value.trim(),
+        apiKey: $('aiVKey').value.trim()
+      }
     });
-    const r = await window.api.ai.probe();
+    const r = await window.api.ai.probe({ vision: !!vision });
     btn.disabled = false;
-    btn.textContent = '测试连接';
-    if (r.ok) toast('连接正常：' + r.model, 'ok', 2400);
+    btn.textContent = label;
+    if (r.ok) toast((vision ? '视觉模型' : '文本模型') + '连接正常：' + r.model, 'ok', 2400);
     else toast('连接失败：' + r.error, 'error', 6000);
   }
+
+  $('aiCfgTest').addEventListener('click', () => aiProbe(false));
+  $('aiVCfgTest').addEventListener('click', () => aiProbe(true));
+  $('aiVPreset').addEventListener('change', () => {
+    const v = $('aiVPreset').value;
+    if (v === 'custom') return;
+    const [base, model] = v.split('|');
+    $('aiVBaseURL').value = base;
+    $('aiVModel').value = model;
+  });
 
   $('aiSend').addEventListener('click', aiSend);
   $('aiStop').addEventListener('click', aiStop);
@@ -1247,7 +1295,6 @@
 
   $('aiPreset').addEventListener('change', aiPresetApply);
   $('aiCfgSave').addEventListener('click', aiSaveConfig);
-  $('aiCfgTest').addEventListener('click', aiProbe);
   $('aiCfgClose').addEventListener('click', () => { $('aiCfgModal').hidden = true; });
   $('aiCfgModal').addEventListener('click', (e) => {
     if (e.target === $('aiCfgModal')) $('aiCfgModal').hidden = true;
@@ -1287,6 +1334,350 @@
     $('aiCtxText').textContent = '引用选中内容：' + sel.replace(/\s+/g, ' ').slice(0, 40) + '…';
     $('aiCtx').hidden = false;
   });
+
+  /* ============================ AI 改动 / 图库 ============================ */
+
+  /* ---- 解析 EDIT 块 ---- */
+  const EDIT_RE = /===EDIT===([\s\S]*?)---OLD---([\s\S]*?)---END---([\s\S]*?)---NEW---([\s\S]*?)---END---/g;
+
+  function parseEdits(text) {
+    const segs = [];
+    let last = 0;
+    let m;
+    EDIT_RE.lastIndex = 0;
+    while ((m = EDIT_RE.exec(text)) !== null) {
+      const before = text.slice(last, m.index);
+      if (before.trim()) segs.push({ type: 'text', text: before });
+      const why = (m[1].match(/说明[:：]\s*([^\n]*)/) || [])[1] || '修改';
+      segs.push({ type: 'edit', why: why.trim(), old: m[2], new: m[4] });
+      last = EDIT_RE.lastIndex;
+    }
+    const tail = text.slice(last);
+    if (tail.trim()) segs.push({ type: 'text', text: tail });
+    return segs;
+  }
+
+  /** 在编辑器里把 oldRaw 换成 newRaw；找不到就返回错误 */
+  function applyEditText(oldRaw, newRaw, force) {
+    const v = editor.value;
+    const isAppend = !String(oldRaw).trim();
+
+    if (!isAppend && !force) {
+      const used = String(oldRaw).trim();
+      // 疑似截断守卫：替换后反而短了一大截
+      if (used.length > 200 && String(newRaw).length < used.length * 0.5) {
+        return { ok: false, error: '改动后内容明显变短，疑似被截断，已拦下' };
+      }
+    }
+
+    if (isAppend) {
+      const sep = v.trim() ? '\n\n' : '';
+      historyRecord('ai');
+      editor.value = v.replace(/\s+$/, '') + sep + String(newRaw).trim() + '\n';
+      editor.setSelectionRange(editor.value.length, editor.value.length);
+      schedulePreview(); updateStatus(); markDirty();
+      return { ok: true, appended: true };
+    }
+
+    const cands = [];
+    const push = (s) => { if (s && !cands.includes(s)) cands.push(s); };
+    push(oldRaw);
+    push(String(oldRaw).replace(/^\n+/, '').replace(/\n+$/, ''));
+    push(String(oldRaw).replace(/\r\n/g, '\n'));
+    push(String(oldRaw).replace(/\r\n/g, '\n').replace(/^\n+/, '').replace(/\n+$/, ''));
+
+    let at = -1;
+    let used = '';
+    for (const c of cands) {
+      at = v.indexOf(c);
+      if (at >= 0) { used = c; break; }
+    }
+    if (at < 0) return { ok: false, error: '文档里找不到这段原文（可能刚被改过）' };
+
+    historyRecord('ai');
+    editor.value = v.slice(0, at) + newRaw + v.slice(at + used.length);
+    const caret = at + String(newRaw).length;
+    editor.setSelectionRange(caret, caret);
+    schedulePreview(); updateStatus(); markDirty();
+    return { ok: true };
+  }
+
+  function makeDiffBlock(oldText, newText) {
+    const box = document.createElement('div');
+    box.className = 'edit-diff';
+    const clip = (s, n) => {
+      const lines = String(s).split('\n');
+      if (lines.length <= n) return { text: lines.join('\n'), more: 0 };
+      return { text: lines.slice(0, n).join('\n'), more: lines.length - n };
+    };
+    if (String(oldText).trim()) {
+      const c = clip(oldText, 10);
+      const d = document.createElement('span');
+      d.className = 'diff-del';
+      d.textContent = c.text + (c.more ? '\n… 还有 ' + c.more + ' 行' : '');
+      box.appendChild(d);
+    }
+    const c2 = clip(newText, 10);
+    const a = document.createElement('span');
+    a.className = 'diff-add';
+    a.textContent = c2.text + (c2.more ? '\n… 还有 ' + c2.more + ' 行' : '');
+    box.appendChild(a);
+    return box;
+  }
+
+  function makeEditCard(seg) {
+    const card = document.createElement('div');
+    card.className = 'edit-card';
+
+    const head = document.createElement('div');
+    head.className = 'edit-head';
+    const badge = document.createElement('span');
+    badge.className = 'edit-badge';
+    badge.textContent = String(seg.old).trim() ? '改动' : '追加';
+    const why = document.createElement('span');
+    why.className = 'edit-why';
+    why.textContent = seg.why || '修改';
+    head.appendChild(badge);
+    head.appendChild(why);
+    card.appendChild(head);
+    card.appendChild(makeDiffBlock(seg.old, seg.new));
+
+    const actions = document.createElement('div');
+    actions.className = 'edit-actions';
+
+    const finish = (okText, cls) => {
+      const st = document.createElement('div');
+      st.className = 'edit-state ' + (cls || '');
+      st.textContent = okText;
+      card.replaceChild(st, actions);
+    };
+
+    const ok = document.createElement('button');
+    ok.className = 'btn-primary';
+    ok.textContent = '同意';
+    ok.addEventListener('click', () => {
+      const r = applyEditText(seg.old, seg.new);
+      if (r.ok) {
+        finish(r.appended ? '已追加到末尾（Ctrl+Z 可撤回）' : '已应用到文档（Ctrl+Z 可撤回）', 'ok');
+        toast('已应用改动', 'ok', 1400);
+      } else {
+        finish('没应用：' + r.error, 'no');
+      }
+    });
+
+    const no = document.createElement('button');
+    no.className = 'stat-btn';
+    no.textContent = '拒绝';
+    no.addEventListener('click', () => finish('已拒绝这处改动', 'no'));
+
+    actions.appendChild(ok);
+    actions.appendChild(no);
+    card.appendChild(actions);
+
+    // 完全读写模式：直接应用
+    if ($('aiRw').checked) {
+      const r = applyEditText(seg.old, seg.new);
+      if (r.ok) {
+        finish('已自动应用（完全读写模式，Ctrl+Z 可撤回）', 'ok');
+      } else {
+        finish('自动应用失败，请手动处理：' + r.error, 'no');
+      }
+    }
+
+    return card;
+  }
+
+  /** 渲染 AI 回复：普通文字走 Markdown，EDIT 块渲染成改动卡片 */
+  function renderAssistantBody(cur) {
+    const text = cur.text || '';
+    const segs = parseEdits(text);
+    cur.plain = segs.filter((s) => s.type === 'text').map((s) => s.text).join('\n').trim();
+
+    if (!segs.length) {
+      cur.bubble.innerHTML = MDRender.render(text || '（没有返回内容）');
+      return;
+    }
+
+    cur.bubble.innerHTML = '';
+    for (const s of segs) {
+      if (s.type === 'text') {
+        const d = document.createElement('div');
+        d.innerHTML = MDRender.render(s.text);
+        cur.bubble.appendChild(d);
+      } else {
+        cur.bubble.appendChild(makeEditCard(s));
+      }
+    }
+  }
+
+  /* ---- 完全读写开关（默认关闭，记在本机） ---- */
+  const RW_STORE = 'dmath.aiRw';
+  function loadRw() {
+    try { $('aiRw').checked = localStorage.getItem(RW_STORE) === '1'; } catch (_) {}
+  }
+  $('aiRw').addEventListener('change', () => {
+    try { localStorage.setItem(RW_STORE, $('aiRw').checked ? '1' : '0'); } catch (_) {}
+    if ($('aiRw').checked) toast('已开启完全读写：AI 会直接改文件', 'error', 3200);
+  });
+
+  /* ============================ 图库 ============================ */
+  const GAL_SEL = new Set();
+
+  function galSelectedPaths() {
+    return Array.from(GAL_SEL);
+  }
+
+  async function openGallery() {
+    $('galleryModal').hidden = false;
+    await renderGallery();
+  }
+
+  async function renderGallery() {
+    const grid = $('galGrid');
+    grid.innerHTML = '';
+    let items = [];
+    try { items = await window.api.gallery.list(); } catch (_) { items = []; }
+
+    const cards = [];
+    for (const it of items) {
+      for (const img of it.images) cards.push({ it, img });
+    }
+
+    $('galEmpty').hidden = cards.length > 0;
+    $('galCount').textContent = cards.length ? cards.length + ' 张' : '';
+
+    for (const { it, img } of cards) {
+      const cell = document.createElement('div');
+      cell.className = 'gal-item' + (GAL_SEL.has(img.file) ? ' is-checked' : '');
+      cell.title = img.name + '\n' + (it.source || '');
+
+      const pic = document.createElement('img');
+      pic.src = img.thumb;
+      cell.appendChild(pic);
+
+      const tick = document.createElement('span');
+      tick.className = 'gal-tick';
+      cell.appendChild(tick);
+
+      if (it.kind === 'pdf') {
+        const badge = document.createElement('span');
+        badge.className = 'gal-badge';
+        badge.textContent = 'PDF';
+        cell.appendChild(badge);
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'gal-meta';
+      meta.textContent = (it.source || img.name) + '  ·  ' + Math.round(img.size / 1024) + ' KB';
+      cell.appendChild(meta);
+
+      cell.addEventListener('click', () => {
+        if (GAL_SEL.has(img.file)) { GAL_SEL.delete(img.file); cell.classList.remove('is-checked'); }
+        else { GAL_SEL.add(img.file); cell.classList.add('is-checked'); }
+        updateGalButtons();
+      });
+
+      grid.appendChild(cell);
+    }
+    updateGalButtons();
+  }
+
+  function updateGalButtons() {
+    const n = GAL_SEL.size;
+    $('galRecognize').disabled = n === 0;
+    $('galRecognize').textContent = n ? '识别选中（' + n + '）' : '识别选中';
+    $('galDelete').disabled = n === 0;
+  }
+
+  async function galUpload() {
+    const r = await window.api.gallery.import({ fromDialog: true });
+    if (r.canceled) return;
+    if (r.failed && r.failed.length) {
+      toast('有 ' + r.failed.length + ' 个文件导入失败：' + r.failed[0].error, 'error', 5000);
+    } else if (r.added) {
+      toast('已添加 ' + r.added + ' 个素材', 'ok', 1800);
+    }
+    await renderGallery();
+  }
+
+  async function galDelete() {
+    if (!GAL_SEL.size) return;
+    const items = await window.api.gallery.list();
+    const ids = new Set();
+    for (const it of items) {
+      for (const img of it.images) if (GAL_SEL.has(img.file)) ids.add(it.id);
+    }
+    const okc = await showConfirm('删除素材', '确定删除选中的 ' + ids.size + ' 个素材？（整组一起删，不影响文档）');
+    if (!okc) return;
+    for (const id of ids) await window.api.gallery.remove(id);
+    GAL_SEL.clear();
+    await renderGallery();
+    toast('已删除', 'ok', 1400);
+  }
+
+  async function galRecognize() {
+    const files = galSelectedPaths();
+    if (!files.length) return;
+
+    const cfg = await window.api.ai.getConfig();
+    if (!cfg.vision.hasKey) {
+      toast('还没配置视觉模型', 'error', 2600);
+      aiOpenConfig();
+      return;
+    }
+
+    const names = files.map((f) => f.split(/[\\/]/).pop());
+    aiAppendUser('识图：' + files.length + ' 张（' + names.slice(0, 3).join('、') + (names.length > 3 ? '…' : '') + '）');
+    aiCur = aiCreateAssistant();
+    aiCur.bubble.textContent = '正在识别图片…';
+    aiSetBusy(true);
+    toggleAiPane(true);
+
+    try {
+      const r = await window.api.ai.ocr({ images: files });
+      if (!r.ok && aiCur) {
+        aiCur.bubble.textContent = '识图失败：' + (r.error || '未知错误');
+        aiSetBusy(false);
+        aiCur = null;
+      }
+    } catch (e) {
+      if (aiCur) {
+        aiCur.bubble.textContent = '识图失败：' + String(e && e.message ? e.message : e);
+        aiSetBusy(false);
+        aiCur = null;
+      }
+    }
+  }
+
+  $('btnGallery').addEventListener('click', openGallery);
+  $('btnGallery2').addEventListener('click', openGallery);
+  $('galClose').addEventListener('click', () => { $('galleryModal').hidden = true; });
+  $('galUpload').addEventListener('click', galUpload);
+  $('galOpenFolder').addEventListener('click', () => window.api.gallery.openFolder());
+  $('galDelete').addEventListener('click', galDelete);
+  $('galRecognize').addEventListener('click', galRecognize);
+  $('galleryModal').addEventListener('click', (e) => {
+    if (e.target === $('galleryModal')) $('galleryModal').hidden = true;
+  });
+
+  // 拖拽导入
+  const galBody = document.querySelector('#galleryModal .modal-body');
+  if (galBody) {
+    galBody.addEventListener('dragover', (e) => { e.preventDefault(); galBody.style.background = '#eef3fa'; });
+    galBody.addEventListener('dragleave', () => { galBody.style.background = ''; });
+    galBody.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      galBody.style.background = '';
+      const paths = Array.from(e.dataTransfer.files || []).map((f) => f.path).filter(Boolean);
+      if (!paths.length) return;
+      const r = await window.api.gallery.import({ paths });
+      if (r.added) toast('已添加 ' + r.added + ' 个素材', 'ok', 1600);
+      if (r.failed && r.failed.length) toast('导入失败：' + r.failed[0].error, 'error', 5000);
+      await renderGallery();
+    });
+  }
+
+  loadRw();
 
   /* ============================ 快捷键体系 ============================ */
   const SHORTCUT_ACTIONS = [

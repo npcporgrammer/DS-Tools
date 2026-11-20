@@ -21,8 +21,18 @@ contextBridge.exposeInMainWorld('api', {
     getConfig: () => ipcRenderer.invoke('ai:getConfig'),
     setConfig: (patch) => ipcRenderer.invoke('ai:setConfig', patch),
     chat: (payload) => ipcRenderer.invoke('ai:chat', payload),
-    probe: () => ipcRenderer.invoke('ai:probe'),
+    ocr: (payload) => ipcRenderer.invoke('ai:ocr', payload),
+    probe: (opts) => ipcRenderer.invoke('ai:probe', opts || {}),
     abort: () => ipcRenderer.invoke('ai:abort'),
     onEvent: (cb) => ipcRenderer.on('ai:event', (_e, ev) => cb(ev))
-  }
+  },
+
+  gallery: {
+    import: (opts) => ipcRenderer.invoke('gallery:import', opts || {}),
+    list: () => ipcRenderer.invoke('gallery:list'),
+    remove: (id) => ipcRenderer.invoke('gallery:remove', id),
+    openFolder: () => ipcRenderer.invoke('gallery:openFolder')
+  },
+
+  snapshot: (name) => ipcRenderer.invoke('docs:snapshot', name)
 });

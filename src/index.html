@@ -165,6 +165,14 @@
       <div class="grp">
         <div class="grp-body">
           <button class="rb" data-snippet="truthtable"><span class="gl">▤</span><span>真值表</span></button>
+          <button class="rb" id="btnGallery">
+            <svg class="ic" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="4.5" width="18" height="15" rx="2" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="8.6" cy="9.8" r="1.6" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M4.5 16.5 9.8 12l3.4 3 2.6-2.2 3.7 3.7" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            </svg>
+            <span>图库</span>
+          </button>
           <button class="rb" data-snippet="proof"><span class="gl">✓</span><span>证明框架</span></button>
           <button class="rb" data-snippet="block"><span class="gl">$$</span><span>公式块</span></button>
         </div>
@@ -236,6 +244,9 @@
         <div class="grp-body col">
           <button class="rs" data-toggle="ai">
             <svg class="ic sm"><use href="#i-ai"/></svg><span>显示 AI 助手</span>
+          </button>
+          <button class="rs" id="btnGallery2">
+            <span class="gl sm">▣</span><span>图库</span>
           </button>
           <button class="rs" id="btnExportsFolder2">
             <span class="gl sm">⇩</span><span>打开导出文件夹</span>
@@ -325,6 +336,9 @@
           <label class="ai-opt" title="把当前打开的整篇文档作为上下文发给 AI">
             <input type="checkbox" id="aiUseDoc" checked><span>带上当前文档</span>
           </label>
+          <label class="ai-opt" id="aiRwWrap" title="打开后 AI 直接改文件，不再逐个询问">
+            <input type="checkbox" id="aiRw"><span>完全读写</span>
+          </label>
           <button class="stat-btn" id="aiClear" title="清空对话">清空</button>
           <span class="spacer"></span>
           <button class="stat-btn" id="aiStop" hidden>停止</button>
@@ -359,6 +373,32 @@
 </div>
 
 <div class="toast-wrap" id="toastWrap"></div>
+
+<div class="modal wide" id="galleryModal" hidden>
+  <div class="modal-card wide">
+    <header>
+      <h3>图库</h3>
+      <span class="gal-count" id="galCount"></span>
+      <span class="spacer"></span>
+      <button class="stat-btn" id="galUpload">＋ 添加图片 / PDF</button>
+      <button class="stat-btn" id="galOpenFolder">打开文件夹</button>
+      <button class="stat-btn" id="galClose">关闭</button>
+    </header>
+    <div class="modal-body gal-body">
+      <div class="gal-grid" id="galGrid"></div>
+      <div class="gal-empty" id="galEmpty">
+        还没有素材。点右上角「添加图片 / PDF」，或把文件拖进这个窗口。<br>
+        <span>支持 PNG / JPG / WebP / BMP / GIF / PDF，PDF 会自动按页拆开。</span>
+      </div>
+    </div>
+    <footer>
+      <span class="gal-hint">勾选要识别的图片，然后点「识别」</span>
+      <span class="spacer"></span>
+      <button class="stat-btn" id="galDelete">删除选中素材</button>
+      <button class="btn-primary" id="galRecognize">识别选中</button>
+    </footer>
+  </div>
+</div>
 
 <div class="modal" id="keyModal" hidden>
   <div class="modal-card">
@@ -399,9 +439,24 @@
       <div class="cfg-row"><label>模型</label><input id="aiModel" placeholder="deepseek-chat" spellcheck="false"></div>
       <div class="cfg-row"><label>API Key</label><input id="aiKey" type="password" placeholder="留空表示不修改" spellcheck="false"></div>
       <p class="prompt-hint">Key 保存在应用目录的 <code>ai-config.json</code>，默认用 Windows 凭据加密（DPAPI）。接口需兼容 OpenAI 的 <code>/chat/completions</code>。</p>
+
+      <div class="cfg-sep"><span>视觉模型（识图用，可单独一套）</span></div>
+      <div class="cfg-row">
+        <label>预设</label>
+        <select id="aiVPreset">
+          <option value="https://dashscope.aliyuncs.com/compatible-mode/v1|qwen-vl-max">通义千问 · qwen-vl-max</option>
+          <option value="https://open.bigmodel.cn/api/paas/v4|glm-4v-plus">智谱 · glm-4v-plus</option>
+          <option value="https://api.openai.com/v1|gpt-4o-mini">OpenAI · gpt-4o-mini</option>
+          <option value="custom">自定义</option>
+        </select>
+      </div>
+      <div class="cfg-row"><label>Base URL</label><input id="aiVBaseURL" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" spellcheck="false"></div>
+      <div class="cfg-row"><label>模型</label><input id="aiVModel" placeholder="qwen-vl-max" spellcheck="false"></div>
+      <div class="cfg-row"><label>API Key</label><input id="aiVKey" type="password" placeholder="留空表示不修改" spellcheck="false"></div>
     </div>
     <footer>
-      <button class="stat-btn" id="aiCfgTest">测试连接</button>
+      <button class="stat-btn" id="aiCfgTest">测试文本模型</button>
+      <button class="stat-btn" id="aiVCfgTest">测试视觉模型</button>
       <span class="spacer"></span>
       <button class="btn-primary" id="aiCfgSave">保存</button>
     </footer>

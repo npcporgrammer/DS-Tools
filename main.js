@@ -403,52 +403,69 @@ ipcMain.handle('shell:showItem', async (_e, target) => {
 });
 
 /* ----------------------------- AI 助手 ----------------------------- */
-/* 配置存在应用根目录的 ai-config.json；密钥优先用系统凭据加密（DPAPI）。 */
+/* 两套配置：文本模型（问答/改稿）与视觉模型（识图），各自独立 Key。 */
 const AI_CONFIG = path.join(APP_ROOT, 'ai-config.json');
 let aiReq = null;   // 当前进行中的请求，用于「停止」
 
-function readAiConfig() {
-  let c = {};
-  try { c = JSON.parse(fs.readFileSync(AI_CONFIG, 'utf8')) || {}; } catch (_) { c = {}; }
-  let apiKey = '';
-  if (c.keyEnc) {
-    try { apiKey = electron.safeStorage.decryptString(Buffer.from(c.keyEnc, 'base64')); } catch (_) { apiKey = ''; }
-  } else if (c.apiKey) {
-    apiKey = c.apiKey;
+function encKey(key) {
+  try {
+    if (electron.safeStorage && electron.safeStorage.isEncryptionAvailable()) {
+      return { keyEnc: electron.safeStorage.encryptString(key).toString('base64') };
+    }
+  } catch (_) {}
+  return { apiKey: key };
+}
+
+function decKey(obj) {
+  if (!obj) return '';
+  if (obj.keyEnc) {
+    try { return electron.safeStorage.decryptString(Buffer.from(obj.keyEnc, 'base64')); } catch (_) { return ''; }
   }
+  return obj.apiKey || '';
+}
+
+function readRawConfig() {
+  try { return JSON.parse(fs.readFileSync(AI_CONFIG, 'utf8')) || {}; } catch (_) { return {}; }
+}
+
+function readAiConfig() {
+  const c = readRawConfig();
+  const v = c.vision || {};
   return {
     baseURL: c.baseURL || 'https://api.deepseek.com',
     model: c.model || 'deepseek-chat',
     temperature: typeof c.temperature === 'number' ? c.temperature : 0.3,
-    apiKey
+    apiKey: decKey(c),
+    vision: {
+      baseURL: v.baseURL || '',
+      model: v.model || '',
+      apiKey: decKey(v)
+    }
   };
 }
 
 function writeAiConfig(patch) {
-  const cur = readAiConfig();
-  const next = {
-    baseURL: (patch.baseURL || cur.baseURL || '').trim(),
-    model: (patch.model || cur.model || '').trim(),
-    temperature: typeof patch.temperature === 'number' ? patch.temperature : cur.temperature
-  };
+  const raw = readRawConfig();
+  const next = Object.assign({}, raw);
+  const p = patch || {};
 
-  const key = (patch.apiKey || '').trim();
-  if (key) {
-    let enc = null;
-    try {
-      if (electron.safeStorage && electron.safeStorage.isEncryptionAvailable()) {
-        enc = electron.safeStorage.encryptString(key).toString('base64');
-      }
-    } catch (_) { enc = null; }
-    if (enc) next.keyEnc = enc;
-    else next.apiKey = key;              // 系统不支持加密时退回明文
-  } else {
-    // 未传新密钥：保留旧的
-    try {
-      const old = JSON.parse(fs.readFileSync(AI_CONFIG, 'utf8')) || {};
-      if (old.keyEnc) next.keyEnc = old.keyEnc;
-      else if (old.apiKey) next.apiKey = old.apiKey;
-    } catch (_) {}
+  if (p.baseURL !== undefined) next.baseURL = String(p.baseURL || '').trim();
+  if (p.model !== undefined) next.model = String(p.model || '').trim();
+  if (typeof p.temperature === 'number') next.temperature = p.temperature;
+  if (p.apiKey) {
+    delete next.apiKey; delete next.keyEnc;
+    Object.assign(next, encKey(p.apiKey.trim()));
+  }
+
+  if (p.vision) {
+    const v = Object.assign({}, raw.vision || {});
+    if (p.vision.baseURL !== undefined) v.baseURL = String(p.vision.baseURL || '').trim();
+    if (p.vision.model !== undefined) v.model = String(p.vision.model || '').trim();
+    if (p.vision.apiKey) {
+      delete v.apiKey; delete v.keyEnc;
+      Object.assign(v, encKey(p.vision.apiKey.trim()));
+    }
+    next.vision = v;
   }
 
   fs.writeFileSync(AI_CONFIG, JSON.stringify(next, null, 2), 'utf8');
@@ -463,13 +480,14 @@ ipcMain.handle('ai:getConfig', () => {
     temperature: c.temperature,
     hasKey: !!c.apiKey,
     keyTail: c.apiKey ? c.apiKey.slice(-4) : '',
-    encrypted: !!(readAiConfigRawKeyEnc())
+    vision: {
+      baseURL: c.vision.baseURL,
+      model: c.vision.model,
+      hasKey: !!c.vision.apiKey,
+      keyTail: c.vision.apiKey ? c.vision.apiKey.slice(-4) : ''
+    }
   };
 });
-
-function readAiConfigRawKeyEnc() {
-  try { return (JSON.parse(fs.readFileSync(AI_CONFIG, 'utf8')) || {}).keyEnc; } catch (_) { return null; }
-}
 
 ipcMain.handle('ai:setConfig', (_e, patch) => {
   try {
@@ -480,7 +498,7 @@ ipcMain.handle('ai:setConfig', (_e, patch) => {
   }
 });
 
-/** 极简 SSE 解析：边收边推 delta，支持 reasoning_content（推演过程） */
+/** 极简 SSE 解析：边收边推 delta，支持 reasoning_content 与图片消息 */
 function streamChat({ baseURL, apiKey, model, temperature, messages }, onEvent) {
   return new Promise((resolve) => {
     let settled = false;
@@ -488,8 +506,7 @@ function streamChat({ baseURL, apiKey, model, temperature, messages }, onEvent) 
 
     let url;
     try {
-      const base = String(baseURL || '').replace(/\/+$/, '');
-      url = new URL(base + '/chat/completions');
+      url = new URL(String(baseURL || '').replace(/\/+$/, '') + '/chat/completions');
     } catch (e) {
       return done({ ok: false, error: '接口地址不合法：' + baseURL });
     }
@@ -542,7 +559,7 @@ function streamChat({ baseURL, apiKey, model, temperature, messages }, onEvent) 
     });
 
     req.on('error', (e) => done({ ok: false, error: '请求失败：' + e.message }));
-    req.setTimeout(180000, () => req.destroy(new Error('超时（180s）')));
+    req.setTimeout(300000, () => req.destroy(new Error('超时（300s）')));
 
     aiReq = req;
     req.write(payload);
@@ -564,22 +581,78 @@ ipcMain.handle('ai:chat', async (_e, { messages }) => {
   return r;
 });
 
-ipcMain.handle('ai:probe', async () => {
+/* ---- 识图：走独立的视觉模型 ---- */
+
+const OCR_PROMPT = [
+  '把这张图片里的全部内容完整转写成 Markdown + LaTeX，供「离散数学作业板」编辑器使用。',
+  '',
+  '要求：',
+  '1. 数学公式一律 LaTeX：行内 $...$，独立公式 $$...$$；向量/集合/关系/逻辑符号用标准命令（\\varnothing \\subseteq \\langle \\rangle \\circ \\land \\lor \\forall \\exists \\mathbb 等）。',
+  '2. 表格用 Markdown 表格；矩阵、方程组、分段函数用对应 LaTeX 环境。',
+  '3. 保留原题号、题干文字、选项、证明结构。',
+  '4. 不要输出任何解释说明，不要用 ``` 包裹整篇；直接给内容本身。',
+  '5. 实在看不清的字符写成 ⟨?⟩，不要猜。'
+].join('\n');
+
+const MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif'
+};
+
+function imageToPart(file) {
+  const ext = path.extname(file).toLowerCase();
+  const mime = MIME[ext] || 'image/png';
+  const b64 = fs.readFileSync(file).toString('base64');
+  return { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + b64 } };
+}
+
+ipcMain.handle('ai:ocr', async (_e, { images }) => {
   const c = readAiConfig();
-  if (!c.apiKey) return { ok: false, error: '还没填 API Key' };
+  if (!c.vision.apiKey || !c.vision.baseURL || !c.vision.model) {
+    return { ok: false, error: '还没配置视觉模型（设置 → AI 接口 → 视觉模型）' };
+  }
+  const files = (images || []).filter((p) => p && fs.existsSync(p));
+  if (!files.length) return { ok: false, error: '没有可识别的图片' };
+
+  const send = (p2) => { if (win && !win.isDestroyed()) win.webContents.send('ai:event', p2); };
+  const content = [{ type: 'text', text: OCR_PROMPT }];
+  for (const f of files) content.push(imageToPart(f));
+
+  const messages = [{ role: 'user', content }];
+  send({ type: 'start' });
+  const r = await streamChat({
+    baseURL: c.vision.baseURL,
+    apiKey: c.vision.apiKey,
+    model: c.vision.model,
+    temperature: 0.1,
+    messages
+  }, send);
+  aiReq = null;
+  send({ type: r.ok ? 'done' : 'error', error: r.error || '' });
+  return r;
+});
+
+ipcMain.handle('ai:probe', async (_e, { vision } = {}) => {
+  const c = readAiConfig();
+  const cfg = vision ? c.vision : c;
+  if (!cfg.apiKey) return { ok: false, error: vision ? '还没填视觉模型的 Key' : '还没填 API Key' };
+  if (!cfg.baseURL || !cfg.model) return { ok: false, error: 'Base URL / 模型没填完整' };
 
   return new Promise((resolve) => {
     let settled = false;
     const done = (r) => { if (!settled) { settled = true; resolve(r); } };
     let url;
     try {
-      url = new URL(String(c.baseURL).replace(/\/+$/, '') + '/chat/completions');
+      url = new URL(String(cfg.baseURL).replace(/\/+$/, '') + '/chat/completions');
     } catch (e) {
       return done({ ok: false, error: 'Base URL 不合法' });
     }
 
     const payload = JSON.stringify({
-      model: c.model,
+      model: cfg.model,
       messages: [{ role: 'user', content: 'ping' }],
       max_tokens: 1,
       stream: false
@@ -592,14 +665,14 @@ ipcMain.handle('ai:probe', async () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + c.apiKey,
+        'Authorization': 'Bearer ' + cfg.apiKey,
         'Content-Length': Buffer.byteLength(payload)
       }
     }, (res) => {
       let body = '';
       res.on('data', (d) => { body += d.toString(); });
       res.on('end', () => {
-        if (res.statusCode === 200) done({ ok: true, model: c.model });
+        if (res.statusCode === 200) done({ ok: true, model: cfg.model });
         else done({ ok: false, error: 'HTTP ' + res.statusCode + '：' + body.slice(0, 300) });
       });
     });
@@ -617,6 +690,208 @@ ipcMain.handle('ai:abort', () => {
     return { ok: true };
   }
   return { ok: false };
+});
+
+/* ----------------------------- 图库 ----------------------------- */
+const GALLERY_DIR = path.join(APP_ROOT, '图库');
+
+function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
+
+function stamp() {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
+    p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+
+function findPdftoppm() {
+  const cands = [
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'MiKTeX', 'miktex', 'bin', 'x64', 'pdftoppm.exe'),
+    'C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\pdftoppm.exe'
+  ];
+  for (const c of cands) { if (fs.existsSync(c)) return c; }
+  return 'pdftoppm';   // 退回到 PATH
+}
+
+function runPdftoppm(pdfPath, outPrefix) {
+  return new Promise((resolve) => {
+    const exe = findPdftoppm();
+    const child = spawn(exe, ['-png', '-r', '150', pdfPath, outPrefix], {
+      windowsHide: true,
+      env: Object.assign({}, process.env, {
+        TEMP: WORK_DIR, TMP: WORK_DIR, TMPDIR: WORK_DIR
+      })
+    });
+    let err = '';
+    child.stderr.on('data', (d) => { err += d.toString(); });
+    child.on('error', (e) => resolve({ ok: false, error: 'PDF 转图片失败：' + e.message }));
+    child.on('close', (code) => {
+      if (code === 0) resolve({ ok: true });
+      else resolve({ ok: false, error: 'pdftoppm 退出码 ' + code + '：' + err.slice(0, 200) });
+    });
+  });
+}
+
+function makeThumb(srcPath, thumbPath) {
+  try {
+    const img = electron.nativeImage.createFromPath(srcPath);
+    if (img.isEmpty()) return;
+    const w = img.getSize().width;
+    const t = w > 260 ? img.resize({ width: 260, quality: 'good' }) : img;
+    fs.writeFileSync(thumbPath, t.toPNG());
+  } catch (_) {}
+}
+
+async function importOne(srcPath) {
+  const ext = path.extname(srcPath).toLowerCase();
+  const id = stamp() + '-' + Math.random().toString(36).slice(2, 6);
+  const dir = path.join(GALLERY_DIR, id);
+  ensureDir(dir);
+
+  const meta = {
+    id,
+    source: path.basename(srcPath),
+    created: Date.now(),
+    kind: ext === '.pdf' ? 'pdf' : 'image',
+    files: []
+  };
+
+  if (ext === '.pdf') {
+    const r = await runPdftoppm(srcPath, path.join(dir, 'page'));
+    if (!r.ok) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {} return r; }
+    meta.files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.png')).sort((a, b) => {
+      const na = parseInt((a.match(/(\d+)/) || [])[1] || '0', 10);
+      const nb = parseInt((b.match(/(\d+)/) || [])[1] || '0', 10);
+      return na - nb;
+    });
+  } else {
+    const keep = MIME[ext] ? ext : '.png';
+    let target = path.join(dir, 'image' + keep);
+    if (!MIME[ext]) {
+      // WebP/BMP 之类统一转 PNG，保证各家视觉模型都吃
+      try {
+        const img = electron.nativeImage.createFromPath(srcPath);
+        if (img.isEmpty()) return { ok: false, error: '无法读取这张图片：' + path.basename(srcPath) };
+        fs.writeFileSync(target, img.toPNG());
+      } catch (e) {
+        return { ok: false, error: '图片转换失败：' + e.message };
+      }
+    } else {
+      fs.copyFileSync(srcPath, target);
+    }
+    meta.files = [path.basename(target)];
+  }
+
+  for (const f of meta.files) {
+    makeThumb(path.join(dir, f), path.join(dir, f.replace(/\.[^.]+$/, '') + '.thumb.png'));
+  }
+
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8');
+  return { ok: true, id };
+}
+
+ipcMain.handle('gallery:import', async (_e, { fromDialog, paths: given } = {}) => {
+  let paths = Array.isArray(given) ? given.slice() : [];
+  if (fromDialog) {
+    const r = await dialog.showOpenDialog(win, {
+      title: '添加图片或 PDF 到图库',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '图片与 PDF', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'pdf'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    });
+    if (r.canceled) return { ok: false, canceled: true };
+    paths = r.filePaths;
+  }
+  if (!paths.length) return { ok: true, added: 0 };
+
+  ensureDir(GALLERY_DIR);
+  const results = [];
+  for (const p of paths) {
+    try {
+      const r = await importOne(p);
+      results.push(Object.assign({ file: path.basename(p) }, r));
+    } catch (e) {
+      results.push({ file: path.basename(p), ok: false, error: String(e && e.message) });
+    }
+  }
+  const failed = results.filter((r) => !r.ok && !r.canceled);
+  return { ok: true, added: results.filter((r) => r.ok).length, failed };
+});
+
+ipcMain.handle('gallery:list', () => {
+  ensureDir(GALLERY_DIR);
+  const out = [];
+  for (const name of fs.readdirSync(GALLERY_DIR)) {
+    const dir = path.join(GALLERY_DIR, name);
+    let st;
+    try { st = fs.statSync(dir); } catch (_) { continue; }
+    if (!st.isDirectory()) continue;
+
+    let meta = {};
+    try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch (_) {}
+
+    const files = (meta.files && meta.files.length)
+      ? meta.files
+      : fs.readdirSync(dir).filter((f) => MIME[path.extname(f).toLowerCase()]);
+
+    const images = files.map((f) => {
+      const full = path.join(dir, f);
+      if (!fs.existsSync(full)) return null;
+      const thumb = path.join(dir, f.replace(/\.[^.]+$/, '') + '.thumb.png');
+      if (!fs.existsSync(thumb)) makeThumb(full, thumb);
+      const useThumb = fs.existsSync(thumb) ? thumb : full;
+      let size = 0;
+      try { size = fs.statSync(full).size; } catch (_) {}
+      return {
+        file: full,
+        name: f,
+        size,
+        thumb: 'data:image/png;base64,' + fs.readFileSync(useThumb).toString('base64')
+      };
+    }).filter(Boolean);
+
+    out.push({
+      id: name,
+      source: meta.source || name,
+      kind: meta.kind || 'image',
+      created: meta.created || st.mtimeMs,
+      images
+    });
+  }
+  out.sort((a, b) => b.created - a.created);
+  return out;
+});
+
+ipcMain.handle('gallery:remove', (_e, id) => {
+  if (!id || id.includes('..') || id.includes('/') || id.includes('\\')) return { ok: false, error: '非法 id' };
+  const dir = path.join(GALLERY_DIR, id);
+  if (!fs.existsSync(dir)) return { ok: false, error: '不存在' };
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message) };
+  }
+});
+
+ipcMain.handle('gallery:openFolder', () => openFolder(GALLERY_DIR));
+
+/* 改动前的磁盘快照，供「回滚」用 */
+ipcMain.handle('docs:snapshot', (_e, name) => {
+  try {
+    if (!name) return { ok: false, error: '没有文件名' };
+    const src = path.join(DOCS_DIR, name);
+    if (!fs.existsSync(src)) return { ok: false, error: '文件不存在' };
+    const stampDir = path.join(DOCS_DIR, '.history', name.replace(/\.md$/i, ''));
+    ensureDir(stampDir);
+    const target = path.join(stampDir, new Date().toISOString().replace(/[:.]/g, '-') + '.md');
+    fs.copyFileSync(src, target);
+    return { ok: true, path: target };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message) };
+  }
 });
 
 /* ---------------------------- 自测钩子 ---------------------------- */

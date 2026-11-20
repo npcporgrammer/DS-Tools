@@ -76,6 +76,7 @@
       <button class="tab is-active" data-tab="home">开始</button>
       <button class="tab" data-tab="insert">插入</button>
       <button class="tab" data-tab="view">视图</button>
+      <button class="tab" data-tab="settings">设置</button>
     </nav>
 
     <span class="spacer"></span>
@@ -213,6 +214,43 @@
         <div class="grp-label">显示比例</div>
       </div>
     </section>
+
+    <section class="panel" data-panel="settings">
+      <div class="grp">
+        <div class="grp-body">
+          <button class="rb" id="btnShortcuts">
+            <svg class="ic" viewBox="0 0 24 24" fill="none">
+              <rect x="2.5" y="6.5" width="19" height="13" rx="2.2" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M6.2 10.4h1.2M9.6 10.4h1.2M13 10.4h1.2M16.4 10.4h1.2M6.2 13.6h1.2M9.6 13.6h1.2M13 13.6h1.2M16.4 13.6h1.2M8 16.8h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+            <span>快捷键</span>
+          </button>
+          <button class="rb" id="btnAiCfg">
+            <svg class="ic"><use href="#i-ai"/></svg><span>AI 接口</span>
+          </button>
+        </div>
+        <div class="grp-label">设置</div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-body col">
+          <button class="rs" data-toggle="ai">
+            <svg class="ic sm"><use href="#i-ai"/></svg><span>显示 AI 助手</span>
+          </button>
+          <button class="rs" id="btnExportsFolder2">
+            <span class="gl sm">⇩</span><span>打开导出文件夹</span>
+          </button>
+        </div>
+        <div class="grp-label">工具</div>
+      </div>
+
+      <div class="grp grow">
+        <div class="grp-body" style="align-items:center;padding-left:6px">
+          <span class="about-text">离散作业板 v0.5 · Ctrl+滚轮可缩放预览</span>
+        </div>
+        <div class="grp-label">关于</div>
+      </div>
+    </section>
   </div>
 
   <!-- 工作区 -->
@@ -284,6 +322,9 @@
         </div>
         <textarea id="aiInput" rows="3" placeholder="问点什么…（Ctrl+Enter 发送）" spellcheck="false"></textarea>
         <div class="ai-row">
+          <label class="ai-opt" title="把当前打开的整篇文档作为上下文发给 AI">
+            <input type="checkbox" id="aiUseDoc" checked><span>带上当前文档</span>
+          </label>
           <button class="stat-btn" id="aiClear" title="清空对话">清空</button>
           <span class="spacer"></span>
           <button class="stat-btn" id="aiStop" hidden>停止</button>
@@ -318,6 +359,24 @@
 </div>
 
 <div class="toast-wrap" id="toastWrap"></div>
+
+<div class="modal" id="keyModal" hidden>
+  <div class="modal-card">
+    <header>
+      <h3>快捷键</h3>
+      <button class="stat-btn" id="keyClose">关闭</button>
+    </header>
+    <div class="modal-body">
+      <div class="key-list" id="keyList"></div>
+      <p class="prompt-hint">点右边的组合键，然后按下新的按键；<code>Esc</code> 取消录制。修改立即生效，只存在本机。</p>
+    </div>
+    <footer>
+      <button class="stat-btn" id="keyReset">恢复默认</button>
+      <span class="spacer"></span>
+      <button class="btn-primary" id="keyDone">完成</button>
+    </footer>
+  </div>
+</div>
 
 <div class="modal" id="aiCfgModal" hidden>
   <div class="modal-card">

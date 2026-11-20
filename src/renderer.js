@@ -652,7 +652,7 @@
   }
 
   async function newDoc() {
-    const name = await showPrompt('新建作业', '离散数学作业.md');
+    const name = await showPrompt('新建作业', defaultNewName());
     if (!name) return;
     if (dirty) await saveDoc(true);
     const r = await window.api.createDoc({ name, content: DEFAULT_DOC });
@@ -890,32 +890,48 @@
     }
   });
 
-  // 快捷键
+    // 快捷键（可配置）
   window.addEventListener('keydown', (e) => {
+    // 正在录制新组合
+    if (recording) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        recording.btn.classList.remove('recording');
+        recording = null;
+        renderKeyList();
+        return;
+      }
+      const combo = comboFromEvent(e);
+      if (!combo) return;
+      const dup = SHORTCUT_ACTIONS.find((a) => a.id !== recording.id && keyOf(a.id).toLowerCase() === combo.toLowerCase());
+      if (dup) toast('这个组合已被「' + dup.label + '」占用', 'error', 2600);
+      keyMap[recording.id] = combo;
+      saveKeys();
+      recording = null;
+      renderKeyList();
+      return;
+    }
+
+    if (!$('keyModal').hidden) return;
     if (!$('promptModal').hidden) return;
+    if (!$('aiCfgModal').hidden) return;
 
     const tag = (e.target && e.target.tagName) || '';
     const inField = tag === 'INPUT';
 
-    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
-      const k = e.key.toLowerCase();
+    // 输入框里的原生撤销不抢
+    if (inField && (e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase())) return;
 
-      if (k === 'z' && !inField) {
-        e.preventDefault();
-        if (e.shiftKey) doRedo(); else doUndo();
-        return;
-      }
-      if (k === 'y' && !inField) { e.preventDefault(); doRedo(); return; }
-
-      if (k === 'n') { e.preventDefault(); newDoc(); return; }
-      if (k === 'o') { e.preventDefault(); openDocDialog(); return; }
-      if (k === 's') { e.preventDefault(); saveDoc(false); return; }
-      if (k === 'e') { e.preventDefault(); exportDoc(); return; }
+    const hit = matchShortcut(e);
+    if (hit) {
+      e.preventDefault();
+      hit.run();
+      return;
     }
 
     if (e.key === 'Escape') $('helpModal').hidden = true;
   });
-
   $('helpClose').addEventListener('click', () => { $('helpModal').hidden = true; });
   $('helpModal').addEventListener('click', (e) => {
     if (e.target === $('helpModal')) $('helpModal').hidden = true;
@@ -1106,9 +1122,18 @@
     aiInput.value = '';
     aiAppendUser(q);
 
-    const content = aiCtx
-      ? '【选中的内容】\n' + aiCtx + '\n\n【问题】\n' + q
-      : q;
+    const parts = [];
+    if ($('aiUseDoc').checked) {
+      const doc = (editor.value || '').trim();
+      if (doc) {
+        const cut = doc.length > 6000;
+        parts.push('【当前文档】' + (currentName || '未命名') + '\n' +
+          (cut ? doc.slice(0, 6000) + '\n……（超出 6000 字，已截断）' : doc));
+      }
+    }
+    if (aiCtx) parts.push('【选中的内容】\n' + aiCtx);
+    parts.push('【问题】\n' + q);
+    const content = parts.join('\n\n');
 
     aiHistory.push({ role: 'user', content });
     if (aiHistory.length > 20) aiHistory = aiHistory.slice(-20);
@@ -1228,6 +1253,32 @@
     if (e.target === $('aiCfgModal')) $('aiCfgModal').hidden = true;
   });
 
+  /* ---- 设置页 —— */
+  function defaultNewName() {
+    const m = meta();
+    let t = m.assignment
+      ? m.course + '第' + m.assignment + '次作业'
+      : (m.course ? m.course + '作业' : '未命名');
+    t = String(t).replace(/\s+/g, '').replace(/[\\/:*?"<>|]/g, '_');
+    return (t || '未命名') + '.md';
+  }
+
+  $('btnShortcuts').addEventListener('click', openKeyModal);
+  $('btnAiCfg').addEventListener('click', aiOpenConfig);
+  $('btnExportsFolder2').addEventListener('click', () => window.api.openExportsFolder());
+
+  $('keyClose').addEventListener('click', () => { $('keyModal').hidden = true; });
+  $('keyDone').addEventListener('click', () => { $('keyModal').hidden = true; });
+  $('keyModal').addEventListener('click', (e) => {
+    if (e.target === $('keyModal')) $('keyModal').hidden = true;
+  });
+  $('keyReset').addEventListener('click', () => {
+    keyMap = {};
+    saveKeys();
+    renderKeyList();
+    toast('已恢复默认快捷键', 'ok', 1600);
+  });
+
   // 编辑器选中内容 → 引用到提问里
   editor.addEventListener('mouseup', () => {
     const sel = editor.value.slice(editor.selectionStart, editor.selectionEnd).trim();
@@ -1236,6 +1287,110 @@
     $('aiCtxText').textContent = '引用选中内容：' + sel.replace(/\s+/g, ' ').slice(0, 40) + '…';
     $('aiCtx').hidden = false;
   });
+
+  /* ============================ 快捷键体系 ============================ */
+  const SHORTCUT_ACTIONS = [
+    { id: 'new', label: '新建作业', def: 'Ctrl+N', run: () => newDoc() },
+    { id: 'openFolder', label: '打开 Projects 文件夹', def: 'Ctrl+O', run: () => openDocDialog() },
+    { id: 'save', label: '保存', def: 'Ctrl+S', run: () => saveDoc(false) },
+    { id: 'export', label: '导出 PDF', def: 'Ctrl+E', run: () => exportDoc() },
+    { id: 'undo', label: '撤回', def: 'Ctrl+Z', run: () => doUndo() },
+    { id: 'redo', label: '重做', def: 'Ctrl+Y', run: () => doRedo() },
+    { id: 'ai', label: '打开 / 关闭 AI 助手', def: 'Ctrl+Shift+A', run: () => toggleAiPane() },
+    { id: 'sidebar', label: '显示 / 隐藏符号面板', def: 'Ctrl+Shift+B', run: () => { document.body.classList.toggle('hide-sidebar'); requestAnimationFrame(fitPage); } },
+    { id: 'preview', label: '显示 / 隐藏预览窗格', def: 'Ctrl+Shift+P', run: () => { document.body.classList.toggle('hide-preview'); requestAnimationFrame(fitPage); } },
+    { id: 'fit', label: '预览：适应宽度', def: 'Ctrl+0', run: () => setFit() },
+    { id: 'exports', label: '打开导出文件夹', def: 'Ctrl+Shift+E', run: () => window.api.openExportsFolder() }
+  ];
+
+  const KEY_STORE = 'dmath.keys';
+  let keyMap = {};
+  let recording = null;
+
+  function loadKeys() {
+    try { keyMap = JSON.parse(localStorage.getItem(KEY_STORE) || '{}') || {}; } catch (_) { keyMap = {}; }
+  }
+  function saveKeys() {
+    try { localStorage.setItem(KEY_STORE, JSON.stringify(keyMap)); } catch (_) {}
+  }
+  function keyOf(id) {
+    const hit = SHORTCUT_ACTIONS.find((a) => a.id === id);
+    return keyMap[id] || (hit ? hit.def : '');
+  }
+
+  /** 把 keydown 事件规范成 "Ctrl+Shift+A" 这样的串；只按修饰键返回 null */
+  function comboFromEvent(e) {
+    const mods = [];
+    if (e.ctrlKey || e.metaKey) mods.push('Ctrl');
+    if (e.altKey) mods.push('Alt');
+    if (e.shiftKey) mods.push('Shift');
+
+    let k = e.key;
+    if (['Control', 'Shift', 'Alt', 'Meta', 'CapsLock'].includes(k)) return null;
+    if (k === ' ') k = 'Space';
+    else if (k === 'Escape') k = 'Esc';
+    else if (k.length === 1) k = k.toUpperCase();
+    else if (k.startsWith('Arrow')) k = k.slice(5);
+
+    mods.push(k);
+    return mods.join('+');
+  }
+
+  function matchShortcut(e) {
+    const combo = comboFromEvent(e);
+    if (!combo) return null;
+    const lower = combo.toLowerCase();
+    return SHORTCUT_ACTIONS.find((a) => keyOf(a.id).toLowerCase() === lower) || null;
+  }
+
+  function renderKeyList() {
+    const list = $('keyList');
+    list.innerHTML = '';
+    for (const a of SHORTCUT_ACTIONS) {
+      const row = document.createElement('div');
+      row.className = 'key-row';
+
+      const name = document.createElement('span');
+      name.className = 'key-name';
+      name.textContent = a.label;
+
+      const btn = document.createElement('button');
+      btn.className = 'key-combo';
+      btn.textContent = keyOf(a.id);
+      btn.dataset.key = a.id;
+      btn.addEventListener('click', () => {
+        if (recording) {
+          recording.btn.classList.remove('recording');
+          recording.btn.textContent = keyOf(recording.id);
+        }
+        recording = { id: a.id, btn };
+        btn.classList.add('recording');
+        btn.textContent = '按下新组合…';
+      });
+
+      row.appendChild(name);
+      row.appendChild(btn);
+      list.appendChild(row);
+    }
+  }
+
+  function openKeyModal() {
+    recording = null;
+    renderKeyList();
+    $('keyModal').hidden = false;
+  }
+
+  /* ============================ Ctrl+滚轮缩放 ============================ */
+  window.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    if (!$('keyModal').hidden || !$('aiCfgModal').hidden || !$('helpModal').hidden) return;
+    e.preventDefault();
+    const cur = zoomMode === 'fit' ? fitScale() : manualZoom;
+    setZoom(cur + (e.deltaY > 0 ? -0.05 : 0.05));
+  }, { passive: false });
+
+  /* 读取本机快捷键配置（放在 keyMap 定义之后，避免 TDZ） */
+  loadKeys();
 
   /* ============================ 启动 ============================ */
   window.addEventListener('error', (e) => {

@@ -35,7 +35,11 @@ const server = http.createServer((req, res) => {
   req.on('end', () => {
     let payload = {};
     try { payload = JSON.parse(body); } catch (_) {}
-    console.log('[mock] model=%s stream=%s', payload.model, payload.stream);
+    const msgs = payload.messages || [];
+    const last = msgs[msgs.length - 1] || {};
+    console.log('[mock] model=%s stream=%s msgs=%d lastLen=%d head=%s',
+      payload.model, payload.stream, msgs.length, (last.content || '').length,
+      JSON.stringify((last.content || '').slice(0, 50)));
 
     if (!payload.stream) {
       res.writeHead(200, { 'Content-Type': 'application/json' });

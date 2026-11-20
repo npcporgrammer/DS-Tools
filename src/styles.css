@@ -1213,3 +1213,67 @@ html, body {
   border-color: var(--w-blue);
   box-shadow: inset 0 0 0 1px var(--w-blue);
 }
+/* ---------------------------- 设置 / 快捷键 ---------------------------- */
+
+.about-text {
+  font-size: 11.5px;
+  color: var(--w-text-3);
+}
+
+.key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 52vh;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 8px;
+  border-radius: 3px;
+}
+.key-row:nth-child(odd) { background: #faf9f8; }
+
+.key-name {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--w-text);
+}
+
+.key-combo {
+  min-width: 128px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--w-line);
+  border-bottom-color: var(--w-line-strong);
+  border-radius: 3px;
+  background: #fff;
+  color: var(--w-text-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all .12s;
+}
+.key-combo:hover { border-color: var(--w-blue); color: var(--w-blue); }
+.key-combo.recording {
+  border-color: var(--w-blue);
+  background: var(--w-blue-soft);
+  color: var(--w-blue);
+  animation: breathe 1s ease-in-out infinite;
+}
+
+/* AI 输入区的选项 */
+.ai-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--w-text-2);
+  cursor: pointer;
+  user-select: none;
+}
+.ai-opt input { accent-color: var(--w-blue); cursor: pointer; }

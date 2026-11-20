@@ -5,6 +5,9 @@ dist/
 # 编译临时目录
 .cache/
 
+# AI 接口配置（含密钥）
+ai-config.json
+
 # 用户数据（作业源码与导出的 PDF 不入库）
 Projects/
 导出/

@@ -5,6 +5,11 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $src  = Join-Path $root 'node_modules\electron\dist'
 
+$running = Get-Process -Name '离散作业板' -ErrorAction SilentlyContinue
+if ($running) {
+  throw '应用正在运行（PID: ' + ($running.Id -join ',') + '），请先关闭窗口再打包，否则 dist 会被占用、删不掉。'
+}
+
 if (-not (Test-Path (Join-Path $src 'electron.exe'))) {
   throw '找不到 Electron 运行时，请先在项目目录执行： npm install'
 }

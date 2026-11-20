@@ -15,5 +15,14 @@ contextBridge.exposeInMainWorld('api', {
   openPathRaw: (p) => ipcRenderer.invoke('shell:openPathRaw', p),
   exportPdf: (payload) => ipcRenderer.invoke('pdf:export', payload),
   openPath: (p) => ipcRenderer.invoke('shell:open', p),
-  showItem: (p) => ipcRenderer.invoke('shell:showItem', p)
+  showItem: (p) => ipcRenderer.invoke('shell:showItem', p),
+
+  ai: {
+    getConfig: () => ipcRenderer.invoke('ai:getConfig'),
+    setConfig: (patch) => ipcRenderer.invoke('ai:setConfig', patch),
+    chat: (payload) => ipcRenderer.invoke('ai:chat', payload),
+    probe: () => ipcRenderer.invoke('ai:probe'),
+    abort: () => ipcRenderer.invoke('ai:abort'),
+    onEvent: (cb) => ipcRenderer.on('ai:event', (_e, ev) => cb(ev))
+  }
 });

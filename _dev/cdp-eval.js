@@ -3,6 +3,7 @@
    用法: node cdp-eval.js "<表达式>"            （表达式可为 Promise）
    需要应用带 --remote-debugging-port=9222 启动 */
 const http = require('http');
+const fs = require('fs');
 
 const get = (url) => new Promise((res, rej) => {
   http.get(url, (r) => {
@@ -13,10 +14,14 @@ const get = (url) => new Promise((res, rej) => {
 });
 
 (async () => {
-  const expr = process.argv[2];
+  let expr = process.argv[2];
+  if (expr && expr.startsWith('@')) {
+    expr = require('fs').readFileSync(expr.slice(1), 'utf8');
+  }
   if (!expr) { console.error('缺表达式'); process.exit(1); }
 
-  const list = JSON.parse(await get('http://127.0.0.1:9222/json/list'));
+  const port = process.argv[3] || '9222';
+  const list = JSON.parse(await get('http://127.0.0.1:' + port + '/json/list'));
   const page = list.find((t) => t.type === 'page');
   if (!page) { console.error('没有页面目标'); process.exit(1); }
 

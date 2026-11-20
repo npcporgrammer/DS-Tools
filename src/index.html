@@ -44,6 +44,10 @@
       <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
       <path d="M14.5 4.5v15"/>
     </symbol>
+    <symbol id="i-ai" viewBox="0 0 24 24">
+      <path d="M11.6 3.4l1.75 4.55 4.55 1.75-4.55 1.75L11.6 16l-1.75-4.55L5.3 9.7l4.55-1.75z"/>
+      <path d="M18.4 14.6l.85 2.15 2.15.85-2.15.85-.85 2.15-.85-2.15-2.15-.85 2.15-.85z"/>
+    </symbol>
     <symbol id="i-fitw" viewBox="0 0 24 24">
       <path d="M4 12h16"/>
       <path d="M7.5 8.5 4 12l3.5 3.5M16.5 8.5 20 12l-3.5 3.5"/>
@@ -190,6 +194,9 @@
           <button class="rs" data-toggle="preview">
             <svg class="ic sm"><use href="#i-preview"/></svg><span>预览窗格</span>
           </button>
+          <button class="rs" data-toggle="ai">
+            <svg class="ic sm"><use href="#i-ai"/></svg><span>AI 助手</span>
+          </button>
         </div>
         <div class="grp-label">窗格</div>
       </div>
@@ -259,6 +266,32 @@
       </div>
     </section>
 
+    <aside class="task-pane" id="aiPane" hidden>
+      <div class="task-head">
+        <svg class="ic sm"><use href="#i-ai"/></svg>
+        <span>AI 助手</span>
+        <span class="spacer"></span>
+        <button class="tiny" id="aiSettings" title="接口配置">⚙</button>
+        <button class="tiny" id="aiClose" title="关闭">×</button>
+      </div>
+
+      <div class="ai-msgs" id="aiMsgs"></div>
+
+      <div class="ai-compose">
+        <div class="ai-ctx" id="aiCtx" hidden>
+          <span id="aiCtxText"></span>
+          <button class="tiny" id="aiCtxClear" title="不再引用">×</button>
+        </div>
+        <textarea id="aiInput" rows="3" placeholder="问点什么…（Ctrl+Enter 发送）" spellcheck="false"></textarea>
+        <div class="ai-row">
+          <button class="stat-btn" id="aiClear" title="清空对话">清空</button>
+          <span class="spacer"></span>
+          <button class="stat-btn" id="aiStop" hidden>停止</button>
+          <button class="btn-primary" id="aiSend">发送</button>
+        </div>
+      </div>
+    </aside>
+
     </div>
 
   </main>
@@ -285,6 +318,36 @@
 </div>
 
 <div class="toast-wrap" id="toastWrap"></div>
+
+<div class="modal" id="aiCfgModal" hidden>
+  <div class="modal-card">
+    <header>
+      <h3>AI 接口配置</h3>
+      <button class="stat-btn" id="aiCfgClose">关闭</button>
+    </header>
+    <div class="modal-body">
+      <div class="cfg-row">
+        <label>预设</label>
+        <select id="aiPreset">
+          <option value="https://api.deepseek.com|deepseek-chat">DeepSeek · deepseek-chat（快）</option>
+          <option value="https://api.deepseek.com|deepseek-reasoner">DeepSeek · deepseek-reasoner（带思考过程）</option>
+          <option value="https://api.openai.com/v1|gpt-4o-mini">OpenAI · gpt-4o-mini</option>
+          <option value="https://api.moonshot.cn/v1|moonshot-v1-8k">Moonshot · moonshot-v1-8k</option>
+          <option value="custom">自定义（OpenAI 兼容接口）</option>
+        </select>
+      </div>
+      <div class="cfg-row"><label>Base URL</label><input id="aiBaseURL" placeholder="https://api.deepseek.com" spellcheck="false"></div>
+      <div class="cfg-row"><label>模型</label><input id="aiModel" placeholder="deepseek-chat" spellcheck="false"></div>
+      <div class="cfg-row"><label>API Key</label><input id="aiKey" type="password" placeholder="留空表示不修改" spellcheck="false"></div>
+      <p class="prompt-hint">Key 保存在应用目录的 <code>ai-config.json</code>，默认用 Windows 凭据加密（DPAPI）。接口需兼容 OpenAI 的 <code>/chat/completions</code>。</p>
+    </div>
+    <footer>
+      <button class="stat-btn" id="aiCfgTest">测试连接</button>
+      <span class="spacer"></span>
+      <button class="btn-primary" id="aiCfgSave">保存</button>
+    </footer>
+  </div>
+</div>
 
 <div class="modal" id="confirmModal" hidden>
   <div class="modal-card narrow">

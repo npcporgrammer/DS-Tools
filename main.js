@@ -402,6 +402,223 @@ ipcMain.handle('shell:showItem', async (_e, target) => {
   return true;
 });
 
+/* ----------------------------- AI 助手 ----------------------------- */
+/* 配置存在应用根目录的 ai-config.json；密钥优先用系统凭据加密（DPAPI）。 */
+const AI_CONFIG = path.join(APP_ROOT, 'ai-config.json');
+let aiReq = null;   // 当前进行中的请求，用于「停止」
+
+function readAiConfig() {
+  let c = {};
+  try { c = JSON.parse(fs.readFileSync(AI_CONFIG, 'utf8')) || {}; } catch (_) { c = {}; }
+  let apiKey = '';
+  if (c.keyEnc) {
+    try { apiKey = electron.safeStorage.decryptString(Buffer.from(c.keyEnc, 'base64')); } catch (_) { apiKey = ''; }
+  } else if (c.apiKey) {
+    apiKey = c.apiKey;
+  }
+  return {
+    baseURL: c.baseURL || 'https://api.deepseek.com',
+    model: c.model || 'deepseek-chat',
+    temperature: typeof c.temperature === 'number' ? c.temperature : 0.3,
+    apiKey
+  };
+}
+
+function writeAiConfig(patch) {
+  const cur = readAiConfig();
+  const next = {
+    baseURL: (patch.baseURL || cur.baseURL || '').trim(),
+    model: (patch.model || cur.model || '').trim(),
+    temperature: typeof patch.temperature === 'number' ? patch.temperature : cur.temperature
+  };
+
+  const key = (patch.apiKey || '').trim();
+  if (key) {
+    let enc = null;
+    try {
+      if (electron.safeStorage && electron.safeStorage.isEncryptionAvailable()) {
+        enc = electron.safeStorage.encryptString(key).toString('base64');
+      }
+    } catch (_) { enc = null; }
+    if (enc) next.keyEnc = enc;
+    else next.apiKey = key;              // 系统不支持加密时退回明文
+  } else {
+    // 未传新密钥：保留旧的
+    try {
+      const old = JSON.parse(fs.readFileSync(AI_CONFIG, 'utf8')) || {};
+      if (old.keyEnc) next.keyEnc = old.keyEnc;
+      else if (old.apiKey) next.apiKey = old.apiKey;
+    } catch (_) {}
+  }
+
+  fs.writeFileSync(AI_CONFIG, JSON.stringify(next, null, 2), 'utf8');
+  return next;
+}
+
+ipcMain.handle('ai:getConfig', () => {
+  const c = readAiConfig();
+  return {
+    baseURL: c.baseURL,
+    model: c.model,
+    temperature: c.temperature,
+    hasKey: !!c.apiKey,
+    keyTail: c.apiKey ? c.apiKey.slice(-4) : '',
+    encrypted: !!(readAiConfigRawKeyEnc())
+  };
+});
+
+function readAiConfigRawKeyEnc() {
+  try { return (JSON.parse(fs.readFileSync(AI_CONFIG, 'utf8')) || {}).keyEnc; } catch (_) { return null; }
+}
+
+ipcMain.handle('ai:setConfig', (_e, patch) => {
+  try {
+    writeAiConfig(patch || {});
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message) };
+  }
+});
+
+/** 极简 SSE 解析：边收边推 delta，支持 reasoning_content（推演过程） */
+function streamChat({ baseURL, apiKey, model, temperature, messages }, onEvent) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+
+    let url;
+    try {
+      const base = String(baseURL || '').replace(/\/+$/, '');
+      url = new URL(base + '/chat/completions');
+    } catch (e) {
+      return done({ ok: false, error: '接口地址不合法：' + baseURL });
+    }
+
+    const payload = JSON.stringify({ model, messages, stream: true, temperature });
+    const mod = url.protocol === 'http:' ? require('http') : require('https');
+
+    const req = mod.request({
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'http:' ? 80 : 443),
+      path: url.pathname + url.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey,
+        'Accept': 'text/event-stream',
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        let body = '';
+        res.on('data', (d) => { body += d.toString(); });
+        res.on('end', () => done({ ok: false, error: 'HTTP ' + res.statusCode + '：' + body.slice(0, 400) }));
+        return;
+      }
+
+      let buf = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        buf += chunk;
+        let idx;
+        while ((idx = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, idx).replace(/\r$/, '');
+          buf = buf.slice(idx + 1);
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (data === '[DONE]') { done({ ok: true }); return; }
+          if (!data) continue;
+          let j;
+          try { j = JSON.parse(data); } catch (_) { continue; }
+          const choice = (j.choices && j.choices[0]) || {};
+          const d = choice.delta || {};
+          if (d.reasoning_content) onEvent({ type: 'reason', text: d.reasoning_content });
+          if (d.content) onEvent({ type: 'content', text: d.content });
+          if (j.usage) onEvent({ type: 'usage', usage: j.usage });
+        }
+      });
+      res.on('end', () => done({ ok: true }));
+      res.on('error', (e) => done({ ok: false, error: '读取流失败：' + e.message }));
+    });
+
+    req.on('error', (e) => done({ ok: false, error: '请求失败：' + e.message }));
+    req.setTimeout(180000, () => req.destroy(new Error('超时（180s）')));
+
+    aiReq = req;
+    req.write(payload);
+    req.end();
+  });
+}
+
+ipcMain.handle('ai:chat', async (_e, { messages }) => {
+  const c = readAiConfig();
+  if (!c.apiKey) return { ok: false, error: '还没填 API Key，点右上角齿轮配置一下' };
+  if (!Array.isArray(messages) || !messages.length) return { ok: false, error: '消息为空' };
+
+  const send = (payload) => { if (win && !win.isDestroyed()) win.webContents.send('ai:event', payload); };
+
+  send({ type: 'start' });
+  const r = await streamChat(Object.assign({}, c, { messages }), send);
+  aiReq = null;
+  send({ type: r.ok ? 'done' : 'error', error: r.error || '' });
+  return r;
+});
+
+ipcMain.handle('ai:probe', async () => {
+  const c = readAiConfig();
+  if (!c.apiKey) return { ok: false, error: '还没填 API Key' };
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let url;
+    try {
+      url = new URL(String(c.baseURL).replace(/\/+$/, '') + '/chat/completions');
+    } catch (e) {
+      return done({ ok: false, error: 'Base URL 不合法' });
+    }
+
+    const payload = JSON.stringify({
+      model: c.model,
+      messages: [{ role: 'user', content: 'ping' }],
+      max_tokens: 1,
+      stream: false
+    });
+    const mod = url.protocol === 'http:' ? require('http') : require('https');
+    const req = mod.request({
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'http:' ? 80 : 443),
+      path: url.pathname + url.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + c.apiKey,
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    }, (res) => {
+      let body = '';
+      res.on('data', (d) => { body += d.toString(); });
+      res.on('end', () => {
+        if (res.statusCode === 200) done({ ok: true, model: c.model });
+        else done({ ok: false, error: 'HTTP ' + res.statusCode + '：' + body.slice(0, 300) });
+      });
+    });
+    req.on('error', (e) => done({ ok: false, error: e.message }));
+    req.setTimeout(20000, () => req.destroy(new Error('超时')));
+    req.write(payload);
+    req.end();
+  });
+});
+
+ipcMain.handle('ai:abort', () => {
+  if (aiReq) {
+    try { aiReq.destroy(new Error('用户中断')); } catch (_) {}
+    aiReq = null;
+    return { ok: true };
+  }
+  return { ok: false };
+});
+
 /* ---------------------------- 自测钩子 ---------------------------- */
 // 设置 DMATH_SELFTEST=<输出目录> 时，加载完成后自动用编辑器内容跑一次导出，
 // 结果打印到 stdout 并写 result.json，然后退出。仅用于开发验证。

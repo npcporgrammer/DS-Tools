@@ -768,6 +768,7 @@
 
     if (el.dataset.toggle) {
       const kind = el.dataset.toggle;
+      if (kind === 'ai') { toggleAiPane(); return; }
       document.body.classList.toggle(kind === 'sidebar' ? 'hide-sidebar' : 'hide-preview');
       requestAnimationFrame(fitPage);
       return;
@@ -925,6 +926,316 @@
     fitPage._t = setTimeout(fitPage, 40);
   });
   ro.observe(previewScroll);
+
+  /* ============================ AI 助手 ============================ */
+  const aiPane = $('aiPane');
+  const aiMsgs = $('aiMsgs');
+  const aiInput = $('aiInput');
+  const aiSendBtn = $('aiSend');
+  const aiStopBtn = $('aiStop');
+
+  let aiHistory = [];
+  let aiBusy = false;
+  let aiCtx = '';
+  let aiCur = null;
+
+  const AI_SYSTEM = [
+    '你是「离散数学作业板」内置的助教。',
+    '回答用简体中文，数学公式一律用 LaTeX：行内 $...$，独立公式 $$...$$。',
+    '结论要能直接粘进作业：简洁、分步骤、给出理由，不要客套话。',
+    '涉及集合、关系、图论、组合、数理逻辑时使用标准符号与术语。'
+  ].join('\n');
+
+  function aiEmptyHint() {
+    if (aiMsgs.children.length) return;
+    const d = document.createElement('div');
+    d.className = 'ai-empty';
+    d.innerHTML = '<b>可以这样问：</b><br>' +
+      '· 这道题的思路是什么<br>' +
+      '· 把我这一段证明改严谨<br>' +
+      '· 用 LaTeX 写一个真值表<br><br>' +
+      '在编辑器里选中文字再提问，会自动带上选中内容。';
+    aiMsgs.appendChild(d);
+  }
+
+  function aiScrollBottom() {
+    aiMsgs.scrollTop = aiMsgs.scrollHeight;
+  }
+
+  function toggleAiPane(force) {
+    const show = force === undefined ? aiPane.hidden : force;
+    aiPane.hidden = !show;
+    if (show) {
+      aiEmptyHint();
+      aiInput.focus();
+    }
+    requestAnimationFrame(() => { fitPage(); });
+  }
+
+  function aiAppendUser(text) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-msg user';
+    const role = document.createElement('div');
+    role.className = 'ai-role';
+    role.textContent = '我';
+    const b = document.createElement('div');
+    b.className = 'ai-bubble';
+    b.textContent = text;
+    wrap.appendChild(role);
+    wrap.appendChild(b);
+    aiMsgs.appendChild(wrap);
+    aiScrollBottom();
+  }
+
+  function aiCreateAssistant() {
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-msg assistant';
+
+    const role = document.createElement('div');
+    role.className = 'ai-role';
+    role.textContent = 'AI';
+
+    const think = document.createElement('details');
+    think.className = 'ai-think';
+    think.hidden = true;
+    think.open = true;
+    const sum = document.createElement('summary');
+    sum.textContent = '思考过程';
+    const thinkBody = document.createElement('div');
+    thinkBody.className = 'think-body';
+    think.appendChild(sum);
+    think.appendChild(thinkBody);
+
+    const bubble = document.createElement('div');
+    bubble.className = 'ai-bubble';
+    bubble.textContent = '…';
+
+    wrap.appendChild(role);
+    wrap.appendChild(think);
+    wrap.appendChild(bubble);
+    aiMsgs.appendChild(wrap);
+    aiScrollBottom();
+
+    return { wrap, think, sum, thinkBody, bubble, text: '', reason: '', tools: null };
+  }
+
+  function aiFinalize(cur) {
+    if (!cur) return;
+    cur.bubble.innerHTML = MDRender.render(cur.text || '（没有返回内容）');
+    if (cur.reason) {
+      cur.sum.textContent = '思考过程 · ' + cur.reason.length + ' 字';
+    }
+    if (!cur.tools) {
+      const tools = document.createElement('div');
+      tools.className = 'ai-tools';
+      const ins = document.createElement('button');
+      ins.className = 'stat-btn';
+      ins.textContent = '插入到光标处';
+      ins.addEventListener('click', () => {
+        insertText(cur.text.trim() + '\n', null, 'op');
+        toast('已插入', 'ok', 1400);
+      });
+      const cp = document.createElement('button');
+      cp.className = 'stat-btn';
+      cp.textContent = '复制';
+      cp.addEventListener('click', () => {
+        navigator.clipboard.writeText(cur.text).then(() => toast('已复制', 'ok', 1200));
+      });
+      tools.appendChild(ins);
+      tools.appendChild(cp);
+      cur.wrap.appendChild(tools);
+      cur.tools = tools;
+    }
+    aiScrollBottom();
+  }
+
+  function aiSetBusy(v) {
+    aiBusy = v;
+    aiSendBtn.disabled = v;
+    aiStopBtn.hidden = !v;
+  }
+
+  window.api.ai.onEvent((ev) => {
+    const cur = aiCur;
+    if (!cur) return;
+
+    if (ev.type === 'reason' && ev.text) {
+      cur.reason += ev.text;
+      cur.think.hidden = false;
+      cur.thinkBody.textContent = cur.reason;
+      aiScrollBottom();
+      return;
+    }
+    if (ev.type === 'content' && ev.text) {
+      cur.text += ev.text;
+      cur.bubble.textContent = cur.text;
+      aiScrollBottom();
+      return;
+    }
+    if (ev.type === 'done') {
+      aiFinalize(cur);
+      if (cur.text) aiHistory.push({ role: 'assistant', content: cur.text });
+      aiSetBusy(false);
+      aiCur = null;
+      return;
+    }
+    if (ev.type === 'error') {
+      cur.bubble.textContent = cur.text || '（出错了）';
+      const err = document.createElement('div');
+      err.className = 'err-item';
+      err.style.color = 'var(--red)';
+      err.textContent = ev.error || '请求失败';
+      cur.wrap.appendChild(err);
+      aiSetBusy(false);
+      aiCur = null;
+    }
+  });
+
+  async function aiSend() {
+    if (aiBusy) return;
+    const q = aiInput.value.trim();
+    if (!q) return;
+
+    const cfg = await window.api.ai.getConfig();
+    if (!cfg.hasKey) {
+      toast('先配置 API Key', 'error', 2200);
+      aiOpenConfig();
+      return;
+    }
+
+    aiInput.value = '';
+    aiAppendUser(q);
+
+    const content = aiCtx
+      ? '【选中的内容】\n' + aiCtx + '\n\n【问题】\n' + q
+      : q;
+
+    aiHistory.push({ role: 'user', content });
+    if (aiHistory.length > 20) aiHistory = aiHistory.slice(-20);
+
+    aiCur = aiCreateAssistant();
+    aiSetBusy(true);
+    aiScrollBottom();
+
+    const messages = [{ role: 'system', content: AI_SYSTEM }].concat(aiHistory);
+    try {
+      const r = await window.api.ai.chat({ messages });
+      if (!r.ok && aiCur) {
+        // 主进程也会发 error 事件；这里兜底
+        aiSetBusy(false);
+      }
+    } catch (err) {
+      if (aiCur) {
+        aiCur.bubble.textContent = '请求失败：' + String(err && err.message ? err.message : err);
+        aiSetBusy(false);
+        aiCur = null;
+      }
+    }
+  }
+
+  function aiStop() {
+    window.api.ai.abort();
+    aiSetBusy(false);
+    aiCur = null;
+  }
+
+  /* ---- 接口配置 ---- */
+
+  function aiPresetApply() {
+    const v = $('aiPreset').value;
+    if (v === 'custom') return;
+    const [base, model] = v.split('|');
+    $('aiBaseURL').value = base;
+    $('aiModel').value = model;
+  }
+
+  async function aiOpenConfig() {
+    let c = { baseURL: '', model: '', hasKey: false, keyTail: '' };
+    try { c = await window.api.ai.getConfig(); } catch (_) {}
+
+    $('aiBaseURL').value = c.baseURL || '';
+    $('aiModel').value = c.model || '';
+    const keyEl = $('aiKey');
+    keyEl.value = '';
+    keyEl.placeholder = c.hasKey ? ('已保存（尾号 ' + c.keyTail + '），留空不修改') : 'sk-...';
+
+    const preset = $('aiPreset');
+    const hit = Array.from(preset.options).find((o) => o.value === (c.baseURL + '|' + c.model));
+    preset.value = hit ? hit.value : 'custom';
+
+    $('aiCfgModal').hidden = false;
+  }
+
+  async function aiSaveConfig() {
+    const patch = {
+      baseURL: $('aiBaseURL').value.trim(),
+      model: $('aiModel').value.trim(),
+      apiKey: $('aiKey').value.trim()
+    };
+    if (!patch.baseURL || !patch.model) { toast('Base URL 和模型都要填', 'error', 2400); return; }
+    const r = await window.api.ai.setConfig(patch);
+    if (r && r.ok) {
+      $('aiCfgModal').hidden = true;
+      toast('已保存接口配置', 'ok', 1800);
+    } else {
+      toast('保存失败：' + ((r && r.error) || '未知错误'), 'error', 4000);
+    }
+  }
+
+  async function aiProbe() {
+    const btn = $('aiCfgTest');
+    btn.disabled = true;
+    btn.textContent = '测试中…';
+    // 先保存，避免测的是旧配置
+    await window.api.ai.setConfig({
+      baseURL: $('aiBaseURL').value.trim(),
+      model: $('aiModel').value.trim(),
+      apiKey: $('aiKey').value.trim()
+    });
+    const r = await window.api.ai.probe();
+    btn.disabled = false;
+    btn.textContent = '测试连接';
+    if (r.ok) toast('连接正常：' + r.model, 'ok', 2400);
+    else toast('连接失败：' + r.error, 'error', 6000);
+  }
+
+  $('aiSend').addEventListener('click', aiSend);
+  $('aiStop').addEventListener('click', aiStop);
+  $('aiClose').addEventListener('click', () => toggleAiPane(false));
+  $('aiSettings').addEventListener('click', aiOpenConfig);
+  $('aiClear').addEventListener('click', () => {
+    aiHistory = [];
+    aiMsgs.innerHTML = '';
+    aiEmptyHint();
+  });
+  $('aiCtxClear').addEventListener('click', () => {
+    aiCtx = '';
+    $('aiCtx').hidden = true;
+  });
+
+  aiInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      aiSend();
+    }
+  });
+
+  $('aiPreset').addEventListener('change', aiPresetApply);
+  $('aiCfgSave').addEventListener('click', aiSaveConfig);
+  $('aiCfgTest').addEventListener('click', aiProbe);
+  $('aiCfgClose').addEventListener('click', () => { $('aiCfgModal').hidden = true; });
+  $('aiCfgModal').addEventListener('click', (e) => {
+    if (e.target === $('aiCfgModal')) $('aiCfgModal').hidden = true;
+  });
+
+  // 编辑器选中内容 → 引用到提问里
+  editor.addEventListener('mouseup', () => {
+    const sel = editor.value.slice(editor.selectionStart, editor.selectionEnd).trim();
+    if (!sel || sel.length < 4) return;
+    aiCtx = sel.length > 4000 ? sel.slice(0, 4000) : sel;
+    $('aiCtxText').textContent = '引用选中内容：' + sel.replace(/\s+/g, ' ').slice(0, 40) + '…';
+    $('aiCtx').hidden = false;
+  });
 
   /* ============================ 启动 ============================ */
   window.addEventListener('error', (e) => {

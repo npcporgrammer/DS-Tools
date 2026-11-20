@@ -1258,8 +1258,20 @@ function aiSetBusy(v) {
     const r = await window.api.ai.probe({ vision: !!vision });
     btn.disabled = false;
     btn.textContent = label;
-    if (r.ok) toast((vision ? '视觉模型' : '文本模型') + '连接正常：' + r.model, 'ok', 2400);
-    else toast('连接失败：' + r.error, 'error', 6000);
+    if (r.ok) {
+      toast((vision ? '视觉模型' : '文本模型') + '连接正常：' + r.model, 'ok', 2400);
+    } else {
+      const msg = String(r.error || '');
+      let hint = '';
+      if (msg.includes('Model not exist') || msg.includes('model_not_found')) {
+        hint = ' — 模型名不被支持，换一个（通义千问建议 qwen3-vl-plus）';
+      } else if (msg.includes('Access denied') || msg.includes('403')) {
+        hint = ' — 模型存在但账号没权限，去控制台开通或换模型';
+      } else if (msg.includes('401') || msg.includes('Invalid API-key')) {
+        hint = ' — Key 无效或复制时带了空格';
+      }
+      toast('连接失败：' + msg + hint, 'error', 7000);
+    }
   }
 
   $('aiCfgTest').addEventListener('click', () => aiProbe(false));
